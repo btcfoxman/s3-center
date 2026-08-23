@@ -45,7 +45,7 @@ jobs:
         with:
           registry: ghcr.io
           username: ${{ secrets.GHCR_USERNAME }}
-          password: ${{ secrets.GHCR_TOKEN }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push image
         uses: docker/build-push-action@v6
@@ -93,7 +93,7 @@ jobs:
         run: |
           ssh -i ~/.ssh/deploy_key -p "${DEPLOY_PORT:-22}" "$DEPLOY_USER@$DEPLOY_HOST" \
             "cd '$DEPLOY_PATH' && \
-             echo '${{ secrets.GHCR_TOKEN }}' | docker login ghcr.io -u '${{ secrets.GHCR_USERNAME }}' --password-stdin && \
+             echo '${{ secrets.GITHUB_TOKEN }}' | docker login ghcr.io -u '${{ secrets.GHCR_USERNAME }}' --password-stdin && \
              IMAGE_REGISTRY='$IMAGE_REGISTRY' IMAGE_NAMESPACE='$IMAGE_NAMESPACE' IMAGE_NAME='$IMAGE_NAME' IMAGE_TAG='$IMAGE_TAG' docker compose pull '$DEPLOY_SERVICE' && \
              IMAGE_REGISTRY='$IMAGE_REGISTRY' IMAGE_NAMESPACE='$IMAGE_NAMESPACE' IMAGE_NAME='$IMAGE_NAME' IMAGE_TAG='$IMAGE_TAG' docker compose up -d && \
              for i in \$(seq 1 30); do curl -fsS http://127.0.0.1:48080/health/ready && exit 0; sleep 2; done; \
