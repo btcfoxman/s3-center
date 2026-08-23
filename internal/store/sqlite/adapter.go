@@ -79,7 +79,7 @@ func (a *sqliteTxAdapter) DeletePending(ctx context.Context, intentID string) er
 // single-writer model means no row lock is needed inside a write tx.
 func (a *sqliteTxAdapter) GetExistingCopiesForUpdate(ctx context.Context, objectKey string) ([]core.ExistingCopy, error) {
 	rows, err := a.tx.QueryContext(ctx,
-		`SELECT backend_name, size_bytes, created_at, encrypted,
+		`SELECT backend_name, size_bytes, created_at, encrypted, physical_key,
 		        (encryption_key IS NOT NULL AND length(encryption_key) > 0)
 		 FROM object_locations
 		 WHERE object_key = ?`, objectKey)
@@ -91,16 +91,18 @@ func (a *sqliteTxAdapter) GetExistingCopiesForUpdate(ctx context.Context, object
 	var out []core.ExistingCopy
 	for rows.Next() {
 		var (
-			ec        core.ExistingCopy
-			createdAt string
-			encrypted int
-			hasDEK    int
+			ec          core.ExistingCopy
+			createdAt   string
+			encrypted   int
+			hasDEK      int
+			physicalKey sql.NullString
 		)
-		if err := rows.Scan(&ec.BackendName, &ec.SizeBytes, &createdAt, &encrypted, &hasDEK); err != nil {
+		if err := rows.Scan(&ec.BackendName, &ec.SizeBytes, &createdAt, &encrypted, &physicalKey, &hasDEK); err != nil {
 			return nil, fmt.Errorf("scan existing copy: %w", err)
 		}
 		ec.Encrypted = encrypted != 0
 		ec.HasDEK = hasDEK != 0
+		ec.PhysicalKey = physicalKey.String
 		if t, err := time.Parse(time.RFC3339Nano, createdAt); err == nil {
 			ec.CreatedAt = t
 		}
@@ -127,7 +129,7 @@ func (a *sqliteTxAdapter) GetCopiesForKeysForUpdate(ctx context.Context, keys []
 		return nil, fmt.Errorf("marshal keys: %w", err)
 	}
 	rows, err := a.tx.QueryContext(ctx, `
-		SELECT object_key, backend_name, size_bytes
+		SELECT object_key, backend_name, size_bytes, physical_key
 		FROM object_locations
 		WHERE object_key IN (SELECT value FROM json_each(?))`, string(keysJSON))
 	if err != nil {
@@ -137,9 +139,11 @@ func (a *sqliteTxAdapter) GetCopiesForKeysForUpdate(ctx context.Context, keys []
 	var out []core.KeyedExistingCopy
 	for rows.Next() {
 		var ec core.KeyedExistingCopy
-		if err := rows.Scan(&ec.ObjectKey, &ec.BackendName, &ec.SizeBytes); err != nil {
+		var physicalKey sql.NullString
+		if err := rows.Scan(&ec.ObjectKey, &ec.BackendName, &ec.SizeBytes, &physicalKey); err != nil {
 			return nil, fmt.Errorf("scan keyed copy: %w", err)
 		}
+		ec.PhysicalKey = physicalKey.String
 		out = append(out, ec)
 	}
 	if err := rows.Err(); err != nil {
@@ -177,13 +181,14 @@ func (a *sqliteTxAdapter) InsertObjectLocation(ctx context.Context, loc *core.Ob
 		   (object_key, backend_name, size_bytes, encrypted, encryption_key,
 		    key_id, plaintext_size, content_hash,
 		    compression_algorithm, compression_level, compression_format_version, logical_size,
-		    managed, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		    physical_key, object_version, managed, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		loc.ObjectKey, loc.BackendName, loc.SizeBytes, boolToInt(loc.Encrypted),
 		loc.EncryptionKey,
 		nullableString(loc.KeyID), nullableInt64(loc.PlaintextSize), nullableString(loc.ContentHash),
 		nullableString(loc.CompressionAlgorithm), nullableString(loc.CompressionLevel),
 		nullableInt64(int64(loc.CompressionFormatVersion)), nullableInt64(loc.LogicalSize),
+		nullableString(loc.PhysicalKey), nullableString(loc.ObjectVersion),
 		boolToInt(!loc.Unmanaged),
 		now,
 	); err != nil {
@@ -234,16 +239,19 @@ func (a *sqliteTxAdapter) LockObjectOnBackend(ctx context.Context, objectKey, ba
 		compLevel     sql.NullString
 		compVersion   sql.NullInt64
 		logicalSize   sql.NullInt64
+		physicalKey   sql.NullString
+		objectVersion sql.NullString
 	)
 	err := a.tx.QueryRowContext(ctx,
 		`SELECT size_bytes, encrypted, encryption_key,
 		        key_id, plaintext_size, content_hash,
-		        compression_algorithm, compression_level, compression_format_version, logical_size
+		        compression_algorithm, compression_level, compression_format_version, logical_size,
+		        physical_key, object_version
 		 FROM object_locations
 		 WHERE object_key = ? AND backend_name = ?`,
 		objectKey, backend,
 	).Scan(&size, &encrypted, &encryptionKey, &keyID, &plaintextSize, &contentHash,
-		&compAlgorithm, &compLevel, &compVersion, &logicalSize)
+		&compAlgorithm, &compLevel, &compVersion, &logicalSize, &physicalKey, &objectVersion)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, false, nil
 	}
@@ -263,6 +271,8 @@ func (a *sqliteTxAdapter) LockObjectOnBackend(ctx context.Context, objectKey, ba
 		CompressionLevel:         nullStringValue(compLevel),
 		CompressionFormatVersion: int(nullInt64Value(compVersion)),
 		LogicalSize:              nullInt64Value(logicalSize),
+		PhysicalKey:              physicalKey.String,
+		ObjectVersion:            objectVersion.String,
 	}
 	return loc, true, nil
 }

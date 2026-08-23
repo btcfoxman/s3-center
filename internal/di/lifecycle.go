@@ -17,6 +17,7 @@ import (
 	"github.com/afreidah/s3-orchestrator/internal/breaker"
 	"github.com/afreidah/s3-orchestrator/internal/config"
 	"github.com/afreidah/s3-orchestrator/internal/debug"
+	"github.com/afreidah/s3-orchestrator/internal/directupload"
 	"github.com/afreidah/s3-orchestrator/internal/lifecycle"
 	"github.com/afreidah/s3-orchestrator/internal/notify"
 	"github.com/afreidah/s3-orchestrator/internal/proxy"
@@ -105,6 +106,13 @@ func ProvideLifecycleManager(i do.Injector) (*lifecycle.Manager, error) {
 	sm.Register("cb-watchdog", breaker.NewWatchdog(registry))
 	if fr, err := do.Invoke[*debug.FlightRecorderService](i); err == nil {
 		sm.Register("flight-recorder", fr)
+	}
+	if cfg.DirectUpload.Enabled {
+		uploader, err := do.Invoke[*directupload.Manager](i)
+		if err != nil {
+			return nil, err
+		}
+		sm.Register("direct-upload-reaper", uploader)
 	}
 
 	if !mode.IsWorker() {

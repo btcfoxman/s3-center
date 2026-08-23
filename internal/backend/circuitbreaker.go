@@ -109,6 +109,18 @@ func (cb *CircuitBreakerBackend) DeleteObject(ctx context.Context, key string) e
 	})
 }
 
+// PresignPutObject delegates the optional direct-upload capability through the
+// same health breaker used by ordinary backend requests.
+func (cb *CircuitBreakerBackend) PresignPutObject(ctx context.Context, key, contentType, uploadID string, expires time.Duration) (*PresignedPut, error) {
+	direct, ok := cb.real.(DirectUploadBackend)
+	if !ok {
+		return nil, ErrCopyNotSupported
+	}
+	return breaker.CBCall(cb.CircuitBreaker, func() (*PresignedPut, error) {
+		return direct.PresignPutObject(ctx, key, contentType, uploadID, expires)
+	})
+}
+
 // CopyObject forwards a server-side copy through the circuit breaker
 // when the wrapped backend implements BackendCopier. When it does not,
 // returns ErrCopyNotSupported so the caller falls back to materialized

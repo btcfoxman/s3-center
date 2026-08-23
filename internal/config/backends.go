@@ -34,16 +34,21 @@ type BackendConfig struct {
 	AccessKeyID     string `yaml:"access_key_id"`     // AWS access key ID (required when credential_source is "static")
 	SecretAccessKey string `yaml:"secret_access_key"` // AWS secret access key (required when credential_source is "static")
 	// CredentialSource selects how credentials are resolved: "static" (default, uses keys above) or "default_chain" (AWS SDK chain: env, IMDS, SSO, STS).
-	CredentialSource string `yaml:"credential_source"`
-	ForcePathStyle   bool   `yaml:"force_path_style"`   // Use path-style URLs
-	UnsignedPayload  *bool  `yaml:"unsigned_payload"`   // Skip SigV4 payload hash to stream uploads without buffering (default: true)
-	DisableChecksum  bool   `yaml:"disable_checksum"`   // Disable SDK default checksums for GCS and other providers that reject them (default: false)
-	StripSDKHeaders  bool   `yaml:"strip_sdk_headers"`  // Remove SDK v2 headers (amz-sdk-*, accept-encoding, x-id) before signing for GCS compatibility (default: false)
-	QuotaBytes       int64  `yaml:"quota_bytes"`        // Maximum bytes allowed on this backend (0 = unlimited)
-	MaxObjectSize    int64  `yaml:"max_object_size"`    // Maximum size of a single object in bytes (0 = unlimited)
-	APIRequestLimit  int64  `yaml:"api_request_limit"`  // Monthly API request limit (0 = unlimited)
-	EgressByteLimit  int64  `yaml:"egress_byte_limit"`  // Monthly egress byte limit (0 = unlimited)
-	IngressByteLimit int64  `yaml:"ingress_byte_limit"` // Monthly ingress byte limit (0 = unlimited)
+	CredentialSource   string `yaml:"credential_source"`
+	ForcePathStyle     bool   `yaml:"force_path_style"`     // Use path-style URLs
+	UnsignedPayload    *bool  `yaml:"unsigned_payload"`     // Skip SigV4 payload hash to stream uploads without buffering (default: true)
+	DisableChecksum    bool   `yaml:"disable_checksum"`     // Disable SDK default checksums for GCS and other providers that reject them (default: false)
+	StripSDKHeaders    bool   `yaml:"strip_sdk_headers"`    // Remove SDK v2 headers (amz-sdk-*, accept-encoding, x-id) before signing for GCS compatibility (default: false)
+	QuotaBytes         int64  `yaml:"quota_bytes"`          // Maximum bytes allowed on this backend (0 = unlimited)
+	MaxObjectSize      int64  `yaml:"max_object_size"`      // Maximum size of a single object in bytes (0 = unlimited)
+	APIRequestLimit    int64  `yaml:"api_request_limit"`    // Monthly API request limit (0 = unlimited)
+	EgressByteLimit    int64  `yaml:"egress_byte_limit"`    // Monthly egress byte limit (0 = unlimited)
+	IngressByteLimit   int64  `yaml:"ingress_byte_limit"`   // Monthly ingress byte limit (0 = unlimited)
+	QuotaGroup         string `yaml:"quota_group"`          // Shared provider/account quota group (defaults to backend name)
+	RawLimitBytes      int64  `yaml:"raw_limit_bytes"`      // Provider hard/free-tier ceiling for the group
+	StaticBufferBytes  int64  `yaml:"static_buffer_bytes"`  // Fixed safety reserve kept unavailable
+	DynamicBufferBytes int64  `yaml:"dynamic_buffer_bytes"` // Drift/traffic reserve kept unavailable
+	BillingPolicy      string `yaml:"billing_policy"`       // free_capped or metered
 }
 
 // validateBackends checks every BackendConfig in the configured list,
@@ -75,6 +80,8 @@ func validateBackend(idx int, b *BackendConfig, seenNames map[string]bool) []err
 		b.Name = fmt.Sprintf("backend-%d", idx)
 	}
 	b.CredentialSource = cmp.Or(b.CredentialSource, CredentialSourceStatic)
+	b.QuotaGroup = cmp.Or(b.QuotaGroup, b.Name)
+	b.BillingPolicy = cmp.Or(b.BillingPolicy, "free_capped")
 
 	var errs []error
 	if seenNames[b.Name] {
@@ -144,6 +151,15 @@ func nonNegativeBackendFieldErrs(prefix string, b *BackendConfig) []error {
 	}
 	if b.IngressByteLimit < 0 {
 		errs = append(errs, prefixed(prefix, ErrNegativeIngress))
+	}
+	if b.RawLimitBytes < 0 || b.StaticBufferBytes < 0 || b.DynamicBufferBytes < 0 {
+		errs = append(errs, prefixed(prefix, fmt.Errorf("quota group limits must not be negative")))
+	}
+	if b.RawLimitBytes > 0 && b.StaticBufferBytes+b.DynamicBufferBytes >= b.RawLimitBytes {
+		errs = append(errs, prefixed(prefix, fmt.Errorf("quota group buffers must be smaller than raw_limit_bytes")))
+	}
+	if b.BillingPolicy != "free_capped" && b.BillingPolicy != "metered" {
+		errs = append(errs, prefixed(prefix, fmt.Errorf("billing_policy must be free_capped or metered")))
 	}
 	return errs
 }

@@ -31,7 +31,7 @@ import (
 // backends with their quota limits. Creates new entries or updates existing limits.
 // All updates happen in a single transaction for atomicity.
 func (s *Store) SyncQuotaLimits(ctx context.Context, backends []config.BackendConfig) error {
-	return s.withTx(ctx, func(qtx *db.Queries) error {
+	if err := s.withTx(ctx, func(qtx *db.Queries) error {
 		for i := range backends {
 			err := qtx.UpsertQuotaLimit(ctx, db.UpsertQuotaLimitParams{
 				BackendName: backends[i].Name,
@@ -42,7 +42,38 @@ func (s *Store) SyncQuotaLimits(ctx context.Context, backends []config.BackendCo
 			}
 		}
 		return nil
-	})
+	}); err != nil {
+		return err
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin quota group sync: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	for i := range backends {
+		b := backends[i]
+		raw := b.RawLimitBytes
+		if raw == 0 {
+			raw = b.QuotaBytes
+		}
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO quota_groups (name, raw_limit_bytes, static_buffer_bytes, dynamic_buffer_bytes, billing_policy)
+			VALUES ($1,$2,$3,$4,$5)
+			ON CONFLICT (name) DO UPDATE SET
+				raw_limit_bytes=EXCLUDED.raw_limit_bytes,
+				static_buffer_bytes=EXCLUDED.static_buffer_bytes,
+				dynamic_buffer_bytes=EXCLUDED.dynamic_buffer_bytes,
+				billing_policy=EXCLUDED.billing_policy, updated_at=NOW()`,
+			b.QuotaGroup, raw, b.StaticBufferBytes, b.DynamicBufferBytes, b.BillingPolicy); err != nil {
+			return fmt.Errorf("sync quota group %s: %w", b.QuotaGroup, err)
+		}
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO backend_quota_groups (backend_name, quota_group) VALUES ($1,$2)
+			ON CONFLICT (backend_name) DO UPDATE SET quota_group=EXCLUDED.quota_group`, b.Name, b.QuotaGroup); err != nil {
+			return fmt.Errorf("map backend %s to quota group: %w", b.Name, err)
+		}
+	}
+	return tx.Commit(ctx)
 }
 
 // GetBackendWithSpace finds a backend with enough quota for the given size.

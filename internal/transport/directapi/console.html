@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>S3 Center · 直传控制台</title>
+  <style>
+    :root{--ink:#101916;--paper:#edf0e8;--panel:#f8f9f3;--line:#9aa59c;--signal:#ef5b35;--ok:#1f7a55;--muted:#58635d}
+    *{box-sizing:border-box}body{margin:0;color:var(--ink);background:var(--paper);font-family:"IBM Plex Mono","Noto Sans SC",ui-monospace,monospace;min-height:100vh}
+    body:before{content:"";position:fixed;inset:0;pointer-events:none;opacity:.35;background-image:linear-gradient(rgba(16,25,22,.06) 1px,transparent 1px),linear-gradient(90deg,rgba(16,25,22,.06) 1px,transparent 1px);background-size:28px 28px}
+    header,main{position:relative;z-index:1}header{display:flex;align-items:flex-end;justify-content:space-between;padding:28px 4vw 20px;border-bottom:2px solid var(--ink)}
+    .eyebrow,.label{font-size:11px;letter-spacing:.15em;text-transform:uppercase;color:var(--muted)}h1{font-family:Georgia,"Noto Serif SC",serif;font-size:clamp(34px,6vw,72px);font-weight:500;line-height:.92;margin:8px 0 0}
+    .status{display:flex;gap:8px;align-items:center;font-size:12px}.dot{width:9px;height:9px;background:var(--ok);border-radius:50%;box-shadow:0 0 0 4px rgba(31,122,85,.12)}
+    main{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(300px,.85fr);gap:18px;padding:20px 4vw 48px}.panel{background:var(--panel);border:1px solid var(--line);box-shadow:5px 5px 0 var(--ink);padding:22px}
+    .panel-title{display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--line);padding-bottom:12px;margin-bottom:18px}.panel-title b{font-size:18px}.step{font-size:11px;border:1px solid var(--ink);padding:3px 7px}
+    label{display:block;margin:14px 0 6px;font-size:12px;font-weight:700}input{width:100%;height:44px;border:1px solid var(--line);background:#fff;padding:0 12px;font:inherit;outline:none}input:focus{border:2px solid var(--ink)}
+    .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.drop{margin-top:16px;border:2px dashed var(--line);padding:28px 18px;text-align:center;cursor:pointer;transition:.15s}.drop:hover,.drop.active{border-color:var(--signal);background:#fff5ef}.drop strong{display:block;font-size:17px;margin-bottom:7px}
+    button{border:1px solid var(--ink);background:var(--ink);color:#fff;padding:13px 18px;font:700 12px inherit;letter-spacing:.08em;cursor:pointer}button:hover{background:var(--signal);border-color:var(--signal)}button:disabled{opacity:.35;cursor:not-allowed}.actions{display:flex;justify-content:flex-end;margin-top:18px}
+    .meter{height:14px;border:1px solid var(--ink);padding:2px;margin:12px 0}.meter i{display:block;height:100%;width:0;background:var(--signal);transition:width .2s}.log{min-height:360px;max-height:520px;overflow:auto;background:#101916;color:#d8e0d9;padding:16px;font-size:12px;line-height:1.7}.log p{margin:0;border-bottom:1px solid #29342e;padding:5px 0}.log time{color:#8fa298;margin-right:10px}.log .good{color:#79d6a4}.log .bad{color:#ff8b6c}
+    .note{font-size:12px;color:var(--muted);line-height:1.7;margin-top:18px;border-left:3px solid var(--signal);padding-left:12px}a{color:inherit}@media(max-width:800px){main{grid-template-columns:1fr}.grid{grid-template-columns:1fr}header{align-items:flex-start;gap:20px;flex-direction:column}}
+  </style>
+</head>
+<body>
+<header><div><div class="eyebrow">Capacity-reserved object ingress</div><h1>直传控制台</h1></div><div class="status"><i class="dot"></i>编排服务在线</div></header>
+<main>
+  <section class="panel">
+    <div class="panel-title"><b>创建单文件直传</b><span class="step">01 / 03</span></div>
+    <label for="token">API Bearer Token</label><input id="token" type="password" autocomplete="off" placeholder="仅保存在当前标签页">
+    <div class="grid"><div><label for="bucket">逻辑存储桶</label><input id="bucket" value="assets"></div><div><label for="key">对象键</label><input id="key" placeholder="uploads/示例文件.bin"></div></div>
+    <input id="file" type="file" hidden><div id="drop" class="drop"><strong>选择文件或拖放到此处</strong><span id="filename">单文件上限 256 MiB</span></div>
+    <div class="meter"><i id="progress"></i></div><div class="actions"><button id="start" disabled>预留容量并开始直传</button></div>
+    <p class="note">容量在生成上传地址前即被预留。浏览器直接向对象存储写入不可变物理键；只有完成 HEAD 校验后，逻辑目录才会原子切换到新版本。</p>
+  </section>
+  <aside class="panel"><div class="panel-title"><b>事件流</b><span class="step">LIVE</span></div><div id="log" class="log"><p><time>READY</time>等待选择文件。</p></div></aside>
+</main>
+<script>
+const $=s=>document.querySelector(s), file=$('#file'), drop=$('#drop'), start=$('#start'), log=$('#log'), bar=$('#progress');let chosen;
+const note=(m,c='')=>{const p=document.createElement('p');p.className=c;p.innerHTML=`<time>${new Date().toLocaleTimeString()}</time>${m}`;log.prepend(p)};
+const pick=f=>{chosen=f;if(!f)return;$('#filename').textContent=`${f.name} · ${(f.size/1048576).toFixed(2)} MiB`;if(!$('#key').value)$('#key').value=`uploads/${f.name}`;start.disabled=false};
+drop.onclick=()=>file.click();file.onchange=()=>pick(file.files[0]);['dragenter','dragover'].forEach(e=>drop.addEventListener(e,x=>{x.preventDefault();drop.classList.add('active')}));['dragleave','drop'].forEach(e=>drop.addEventListener(e,x=>{x.preventDefault();drop.classList.remove('active')}));drop.addEventListener('drop',e=>pick(e.dataTransfer.files[0]));
+const request=(url,opt={})=>fetch(url,{...opt,headers:{Authorization:`Bearer ${$('#token').value}`,...opt.headers}});
+start.onclick=async()=>{if(!chosen)return;start.disabled=true;bar.style.width='4%';sessionStorage.setItem('s3-center-token',$('#token').value);try{note('正在事务性预留容量…');const create=await request('/v1/uploads',{method:'POST',headers:{'Content-Type':'application/json','Idempotency-Key':crypto.randomUUID()},body:JSON.stringify({bucket:$('#bucket').value,key:$('#key').value,size:chosen.size,content_type:chosen.type||'application/octet-stream'})});const data=await create.json();if(!create.ok)throw Error(data.error?.message||'创建会话失败');note(`已预留 ${data.declared_bytes} bytes · ${data.backend}`,'good');bar.style.width='18%';
+      await new Promise((resolve,reject)=>{const x=new XMLHttpRequest();x.open(data.upload.method,data.upload.url);Object.entries(data.upload.headers||{}).forEach(([k,v])=>x.setRequestHeader(k,Array.isArray(v)?v.join(','):v));x.upload.onprogress=e=>{if(e.lengthComputable)bar.style.width=`${18+e.loaded/e.total*70}%`};x.onload=()=>x.status>=200&&x.status<300?resolve():reject(Error(`对象存储返回 HTTP ${x.status}`));x.onerror=()=>reject(Error('直传网络错误'));x.send(chosen)});note('物理对象写入完成，正在校验并提交目录…');
+      const done=await request(`/v1/uploads/${data.id}/complete`,{method:'POST'});const result=await done.json();if(!done.ok)throw Error(result.error?.message||'提交失败');bar.style.width='100%';note(`提交成功 · ${result.logical_key}`,'good')
+    }catch(e){note(e.message,'bad');bar.style.width='0%'}finally{start.disabled=false}};
+$('#token').value=sessionStorage.getItem('s3-center-token')||'';
+</script>
+</body></html>

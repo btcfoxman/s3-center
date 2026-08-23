@@ -134,6 +134,8 @@ func (a *pgTxAdapter) LockObjectOnBackend(ctx context.Context, objectKey, backen
 		KeyID:         derefStr(row.KeyID),
 		PlaintextSize: derefInt64(row.PlaintextSize),
 		ContentHash:   derefStr(row.ContentHash),
+		PhysicalKey:   derefStr(row.PhysicalKey),
+		ObjectVersion: derefStr(row.ObjectVersion),
 	}
 	return loc, true, nil
 }
@@ -184,6 +186,7 @@ func keyedExistingCopyFromRow(r *db.GetCopiesForKeysForUpdateRow) core.KeyedExis
 		ObjectKey:   r.ObjectKey,
 		BackendName: r.BackendName,
 		SizeBytes:   r.SizeBytes,
+		PhysicalKey: derefStr(r.PhysicalKey),
 	}
 }
 

@@ -721,3 +721,35 @@ dialog#sync-dialog select:focus {
 
 .log-level-debug .log-lvl { color: #64748b; }
 .log-level-debug .log-msg { color: #94a3b8; }
+
+/* S3 Center industrial control-plane skin. Kept as an override layer so the
+   upstream dashboard's dense operational layout and selectors remain stable. */
+:root { --sc-ink:#101916; --sc-paper:#edf0e8; --sc-panel:#f9faf5; --sc-line:#98a39a; --sc-signal:#ef5b35; --sc-ok:#1f7a55; }
+body {
+  font-family:"IBM Plex Mono","Noto Sans SC",ui-monospace,SFMono-Regular,monospace;
+  background-color:var(--sc-paper); color:var(--sc-ink);
+  background-image:linear-gradient(rgba(16,25,22,.045) 1px,transparent 1px),linear-gradient(90deg,rgba(16,25,22,.045) 1px,transparent 1px);
+  background-size:28px 28px;
+}
+.container { max-width:1440px; padding:1.8rem 3vw 4rem; }
+header { border-bottom:2px solid var(--sc-ink); padding:.8rem 0 1.1rem; }
+header h1,.login-card h1 { font-family:Georgia,"Noto Serif SC",serif; font-size:2rem; font-weight:500; color:var(--sc-ink); letter-spacing:-.04em; }
+.header-kicker,.login-kicker { font-size:.65rem; letter-spacing:.18em; color:#5e6963; margin-bottom:.15rem; }
+.header-logo,.login-logo { display:none; }
+section,.login-card,.modal-content { background:var(--sc-panel); border:1px solid var(--sc-line); border-radius:0; box-shadow:4px 4px 0 var(--sc-ink); }
+section { padding:1.25rem; margin-bottom:1.25rem; }
+section h2 { color:var(--sc-ink); border-bottom:1px solid var(--sc-line); padding-bottom:.75rem; font-family:Georgia,"Noto Serif SC",serif; }
+.config-card,.stat-card { background:#fff; border:1px solid var(--sc-line); border-radius:0; }
+.config-card .label,.stat-card .label,.meta { color:#647069; }
+.config-card .value,.stat-card .value,th,td,.tree-name,.log-msg { color:var(--sc-ink); }
+table { border-color:var(--sc-line); } th { background:#dfe4dc; } th,td { border-color:#c8cec7; }
+.btn-action,.btn-upload,.modal-actions button,.login-card button { border:1px solid var(--sc-ink); border-radius:0; background:var(--sc-ink); color:#fff; font-family:inherit; }
+.btn-action:hover,.btn-upload:hover,.modal-actions button:hover,.login-card button:hover { background:var(--sc-signal); border-color:var(--sc-signal); color:#fff; }
+.direct-link { text-decoration:none; background:var(--sc-signal); border-color:var(--sc-signal); }
+.badge { border-radius:0; border:1px solid currentColor; }.badge-healthy { color:var(--sc-ok); background:#e4f2e8; }.badge-degraded { color:#a13b23; background:#fff0e9; }
+.bar-track { background:#d8ddd6; border-radius:0; border:1px solid var(--sc-ink); padding:2px; height:14px; }.bar-fill { border-radius:0; }
+input,select,textarea,.login-card input { background:#fff; color:var(--sc-ink); border:1px solid var(--sc-line); border-radius:0; }
+.login-wrapper { background:transparent; }.login-card { max-width:420px; padding:2.5rem; }
+.login-card .meta { display:block; margin:.25rem 0 1.6rem; }.login-card label { color:#59645e; }
+.logout-link,a { color:#34443c; }.log-viewer,.log-entry-wrap { background:#101916; }.log-msg { color:#dbe4dc; }
+@media(max-width:720px){.container{padding:1rem}.header-right{flex-wrap:wrap}header h1{font-size:1.6rem}}

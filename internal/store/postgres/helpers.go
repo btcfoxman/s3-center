@@ -90,6 +90,7 @@ func existingCopyFromRow(r *db.GetExistingCopiesForUpdateRow) core.ExistingCopy 
 		SizeBytes:   r.SizeBytes,
 		CreatedAt:   r.CreatedAt.Time,
 		Encrypted:   r.Encrypted,
+		PhysicalKey: derefStr(r.PhysicalKey),
 		HasDEK:      r.HasDek != nil && *r.HasDek,
 	}
 }
@@ -98,9 +99,11 @@ func existingCopyFromRow(r *db.GetExistingCopiesForUpdateRow) core.ExistingCopy 
 // struct, attaching the representation metadata that is present.
 func objectInsertParams(loc *core.ObjectLocation) db.InsertObjectLocationParams {
 	params := db.InsertObjectLocationParams{
-		ObjectKey:   loc.ObjectKey,
-		BackendName: loc.BackendName,
-		SizeBytes:   loc.SizeBytes,
+		ObjectKey:     loc.ObjectKey,
+		BackendName:   loc.BackendName,
+		SizeBytes:     loc.SizeBytes,
+		PhysicalKey:   strPtr(loc.PhysicalKey),
+		ObjectVersion: strPtr(loc.ObjectVersion),
 	}
 	if loc.Encrypted {
 		params.Encrypted = true
@@ -139,6 +142,8 @@ func objectInsertIfNotExistsParams(loc *core.ObjectLocation) db.InsertObjectLoca
 		CompressionLevel:         p.CompressionLevel,
 		CompressionFormatVersion: p.CompressionFormatVersion,
 		LogicalSize:              p.LogicalSize,
+		PhysicalKey:              p.PhysicalKey,
+		ObjectVersion:            p.ObjectVersion,
 		Managed:                  !loc.Unmanaged,
 	}
 }

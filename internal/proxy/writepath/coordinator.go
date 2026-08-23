@@ -249,7 +249,11 @@ func (w *Coordinator) cleanupDisplacedCopies(ctx context.Context, key, newBacken
 				"backend", dc.BackendName, "key", key)
 			continue
 		}
-		w.DeleteOrEnqueue(ctx, dcBackend, dc.BackendName, key, "overwrite_displaced", dc.SizeBytes)
+		storedKey := dc.PhysicalKey
+		if storedKey == "" {
+			storedKey = key
+		}
+		w.DeleteOrEnqueue(ctx, dcBackend, dc.BackendName, storedKey, "overwrite_displaced", dc.SizeBytes)
 	}
 
 	if len(displaced) > 0 {

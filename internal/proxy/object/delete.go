@@ -65,7 +65,11 @@ func (o *Manager) DeleteObject(ctx context.Context, key string) error {
 				"backend", cp.BackendName, "key", key)
 			return
 		}
-		o.coord.DeleteOrEnqueue(ctx, backend, cp.BackendName, key, "delete_failed", cp.SizeBytes)
+		storedKey := cp.PhysicalKey
+		if storedKey == "" {
+			storedKey = key
+		}
+		o.coord.DeleteOrEnqueue(ctx, backend, cp.BackendName, storedKey, "delete_failed", cp.SizeBytes)
 	})
 
 	o.finalizeDelete(ctx, span, key, copies, start)
@@ -152,8 +156,12 @@ func (o *Manager) flattenBatchDeletes(ctx context.Context, copiesByKey map[strin
 					"backend", cp.BackendName, "key", key)
 				continue
 			}
+			storedKey := cp.PhysicalKey
+			if storedKey == "" {
+				storedKey = key
+			}
 			items = append(items, batchDeleteItem{
-				key: key, backend: backend, beName: cp.BackendName, sizeBytes: cp.SizeBytes,
+				key: storedKey, backend: backend, beName: cp.BackendName, sizeBytes: cp.SizeBytes,
 			})
 		}
 	}

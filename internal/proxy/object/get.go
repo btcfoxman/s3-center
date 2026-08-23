@@ -133,8 +133,9 @@ func (o *Manager) getObjectAttempt(ctx context.Context, key, rangeHeader, beName
 		return fail, err
 	}
 	actualRange := br.header
+	storedKey := physicalObjectKey(key, loc)
 
-	r, cancel, err := o.core.GetWithTimeout(ctx, backend, key, actualRange)
+	r, cancel, err := o.core.GetWithTimeout(ctx, backend, storedKey, actualRange)
 	if err != nil {
 		o.core.Acct().APICall(beName)
 		return fail, err
@@ -274,7 +275,7 @@ func (o *Manager) maybeWrapIntegrityReader(
 			"key", key, "backend", beName,
 			"expected_hash", expected, "actual_hash", actual)
 		telemetry.IntegrityErrorsTotal.WithLabelValues("read").Inc()
-		o.coord.DeleteOrEnqueue(ctx, backend, beName, key, "integrity_failed", r.Size)
+		o.coord.DeleteOrEnqueue(ctx, backend, beName, physicalObjectKey(key, loc), "integrity_failed", r.Size)
 		o.dropCorruptedLocation(ctx, key, beName)
 	})
 	r.Body = vr

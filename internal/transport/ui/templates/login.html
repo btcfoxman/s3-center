@@ -1,26 +1,27 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>S3 Orchestrator - Login</title>
+  <title>S3 Center · 管理登录</title>
   <link rel="icon" type="image/svg+xml" href="static/favicon.svg">
   <link rel="stylesheet" href="static/style.css?v={{.Version}}">
 </head>
 <body>
 <div class="login-wrapper">
   <div class="login-card">
-    <img src="static/logo.png" alt="S3 Orchestrator" class="login-logo">
+    <div class="login-kicker">OBJECT CONTROL PLANE</div>
+    <h1>S3 Center</h1>
     <span class="meta">{{.Version}}</span>
     {{if .Error}}
     <div class="login-error">{{.Error}}</div>
     {{end}}
     <form method="post" action="login">
-      <label for="access_key">Access Key</label>
+      <label for="access_key">访问密钥</label>
       <input type="text" id="access_key" name="access_key" required autocomplete="username">
-      <label for="secret_key">Secret Key</label>
+      <label for="secret_key">密钥</label>
       <input type="password" id="secret_key" name="secret_key" required autocomplete="current-password">
-      <button type="submit">Sign In</button>
+      <button type="submit">进入管理面板 / Sign In</button>
     </form>
   </div>
 </div>

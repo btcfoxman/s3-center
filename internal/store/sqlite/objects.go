@@ -80,6 +80,7 @@ func (s *Store) GetAllObjectLocations(ctx context.Context, key string) ([]core.O
 		SELECT object_key, backend_name, size_bytes, encrypted, encryption_key,
 		       key_id, plaintext_size, content_hash,
 		       compression_algorithm, compression_level, compression_format_version, logical_size,
+		       physical_key, object_version,
 		       created_at, last_scrubbed_at
 		FROM object_locations
 		WHERE object_key = ?
@@ -91,7 +92,7 @@ func (s *Store) GetAllObjectLocations(ctx context.Context, key string) ([]core.O
 
 	var locs []core.ObjectLocation
 	for rows.Next() {
-		loc, err := scanObjectLocation(rows)
+		loc, err := scanObjectLocationWithPhysical(rows)
 		if err != nil {
 			return nil, err
 		}
@@ -600,6 +601,62 @@ func scanObjectLocation(rows *sql.Rows) (core.ObjectLocation, error) {
 			return core.ObjectLocation{}, fmt.Errorf(errInvalidTimestamp, *lastScrubbed, err)
 		}
 		loc.LastScrubbedAt = &scrubbed
+	}
+	return loc, nil
+}
+
+// scanObjectLocationWithPhysical is used by the request-time read lookup. Most
+// maintenance queries intentionally project the legacy column set, while this
+// one also resolves immutable direct-upload object keys.
+func scanObjectLocationWithPhysical(rows *sql.Rows) (core.ObjectLocation, error) {
+	var (
+		loc                                                                                    core.ObjectLocation
+		createdAt                                                                              string
+		keyID, contentHash, compAlgorithm, compLevel, physicalKey, objectVersion, lastScrubbed *string
+		plaintextSize, compVersion, logicalSize                                                *int64
+	)
+	if err := rows.Scan(&loc.ObjectKey, &loc.BackendName, &loc.SizeBytes, &loc.Encrypted, &loc.EncryptionKey,
+		&keyID, &plaintextSize, &contentHash, &compAlgorithm, &compLevel, &compVersion, &logicalSize,
+		&physicalKey, &objectVersion, &createdAt, &lastScrubbed); err != nil {
+		return loc, fmt.Errorf("failed to scan object location: %w", err)
+	}
+	var err error
+	if loc.CreatedAt, err = parseTime(createdAt); err != nil {
+		return loc, fmt.Errorf(errInvalidTimestamp, createdAt, err)
+	}
+	if keyID != nil {
+		loc.KeyID = *keyID
+	}
+	if plaintextSize != nil {
+		loc.PlaintextSize = *plaintextSize
+	}
+	if contentHash != nil {
+		loc.ContentHash = *contentHash
+	}
+	if compAlgorithm != nil {
+		loc.CompressionAlgorithm = *compAlgorithm
+	}
+	if compLevel != nil {
+		loc.CompressionLevel = *compLevel
+	}
+	if compVersion != nil {
+		loc.CompressionFormatVersion = int(*compVersion)
+	}
+	if logicalSize != nil {
+		loc.LogicalSize = *logicalSize
+	}
+	if physicalKey != nil {
+		loc.PhysicalKey = *physicalKey
+	}
+	if objectVersion != nil {
+		loc.ObjectVersion = *objectVersion
+	}
+	if lastScrubbed != nil {
+		t, e := parseTime(*lastScrubbed)
+		if e != nil {
+			return loc, fmt.Errorf(errInvalidTimestamp, *lastScrubbed, e)
+		}
+		loc.LastScrubbedAt = &t
 	}
 	return loc, nil
 }

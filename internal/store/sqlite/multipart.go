@@ -239,7 +239,7 @@ func (s *Store) GetStaleMultipartUploads(ctx context.Context, olderThan time.Dur
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT upload_id, object_key, backend_name, content_type, metadata, encryption_key, key_id, created_at
 		 FROM multipart_uploads
-		 WHERE created_at < ?`,
+		 WHERE created_at <= ?`,
 		cutoff,
 	)
 	if err != nil {

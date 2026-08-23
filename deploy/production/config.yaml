@@ -1,0 +1,92 @@
+server:
+  listen_addr: "0.0.0.0:9000"
+  log_level: "info"
+  max_object_size: 268435456
+  max_concurrent_reads: 128
+  max_concurrent_writes: 32
+  load_shed_threshold: 0.9
+  admission_wait: "2s"
+  backend_timeout: "60s"
+
+database:
+  driver: postgres
+  host: postgres
+  port: 5432
+  database: s3_center
+  user: s3_center
+  password: "${POSTGRES_PASSWORD}"
+  ssl_mode: disable
+  max_conns: 32
+  min_conns: 4
+
+buckets:
+  - name: assets
+    credentials:
+      - access_key_id: "${S3_ACCESS_KEY_ID}"
+        secret_access_key: "${S3_SECRET_ACCESS_KEY}"
+
+backends:
+  - name: r2-primary
+    endpoint: "https://${CF_ACCOUNT_ID}.r2.cloudflarestorage.com"
+    region: auto
+    bucket: "${R2_BUCKET}"
+    access_key_id: "${R2_ACCESS_KEY_ID}"
+    secret_access_key: "${R2_SECRET_ACCESS_KEY}"
+    force_path_style: true
+    quota_bytes: 8000000000
+    max_object_size: 268435456
+    quota_group: r2-account-main
+    raw_limit_bytes: 10000000000
+    static_buffer_bytes: 1000000000
+    dynamic_buffer_bytes: 1000000000
+    billing_policy: free_capped
+
+routing_strategy: risk_aware_pack
+
+replication:
+  factor: 1
+
+rebalance:
+  enabled: false
+
+reconcile:
+  enabled: false
+
+telemetry:
+  metrics:
+    enabled: true
+
+ui:
+  enabled: true
+  path: /ui
+  admin_key: "${UI_ADMIN_KEY}"
+  admin_secret: "${UI_ADMIN_SECRET}"
+  admin_token: "${ADMIN_API_TOKEN}"
+  session_secret: "${UI_SESSION_SECRET}"
+  force_secure_cookies: true
+
+direct_upload:
+  enabled: true
+  console_host: s3-center.aiid.qzz.io
+  presign_ttl: "10m"
+  session_ttl: "10m"
+  reaper_interval: "1m"
+  max_object_size: 268435456
+  tokens:
+    - name: production
+      token: "${DIRECT_UPLOAD_TOKEN}"
+      scopes: ["uploads:write", "uploads:read"]
+
+cleanup_queue:
+  concurrency: 4
+
+backend_circuit_breaker:
+  enabled: true
+  failure_threshold: 3
+  open_timeout: "15s"
+
+cache:
+  enabled: true
+  max_size: "128MB"
+  max_object_size: "8MB"
+  ttl: "5m"

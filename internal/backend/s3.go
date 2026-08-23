@@ -66,6 +66,20 @@ type HeadObjectResult struct {
 	Metadata     map[string]string
 }
 
+// PresignedPut describes the request a client must send directly to a backend.
+type PresignedPut struct {
+	URL       string
+	Method    string
+	Headers   http.Header
+	ExpiresAt time.Time
+}
+
+// DirectUploadBackend is an optional capability implemented by S3-compatible
+// backends that can mint a narrowly-scoped PutObject URL.
+type DirectUploadBackend interface {
+	PresignPutObject(ctx context.Context, key, contentType, uploadID string, expires time.Duration) (*PresignedPut, error)
+}
+
 // ObjectBackend defines the interface for object storage operations.
 type ObjectBackend interface {
 	PutObject(ctx context.Context, key string, body io.Reader, size int64, contentType string, metadata map[string]string) (etag string, err error)
@@ -231,6 +245,21 @@ func (b *S3Backend) PutObject(ctx context.Context, key string, body io.Reader, s
 			}
 			return etag, nil
 		})
+}
+
+// PresignPutObject authorizes exactly one immutable physical key. Content-Type
+// and the session marker are signed so completion can verify the upload belongs
+// to the reservation being committed.
+func (b *S3Backend) PresignPutObject(ctx context.Context, key, contentType, uploadID string, expires time.Duration) (*PresignedPut, error) {
+	input := &s3.PutObjectInput{Bucket: aws.String(b.bucket), Key: aws.String(key), Metadata: map[string]string{"upload-id": uploadID}}
+	if contentType != "" {
+		input.ContentType = aws.String(contentType)
+	}
+	result, err := s3.NewPresignClient(b.client).PresignPutObject(ctx, input, func(o *s3.PresignOptions) { o.Expires = expires })
+	if err != nil {
+		return nil, fmt.Errorf("presign put object: %w", err)
+	}
+	return &PresignedPut{URL: result.URL, Method: result.Method, Headers: result.SignedHeader, ExpiresAt: time.Now().Add(expires).UTC()}, nil
 }
 
 // GetObject retrieves an object from the backend. When rangeHeader is non-empty

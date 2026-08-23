@@ -14,7 +14,7 @@
 SELECT pg_advisory_xact_lock(hashtext($1));
 
 -- name: GetExistingCopiesForUpdate :many
-SELECT backend_name, size_bytes, created_at, encrypted,
+SELECT backend_name, size_bytes, created_at, encrypted, physical_key,
        (encryption_key IS NOT NULL AND length(encryption_key) > 0) AS has_dek
 FROM object_locations
 WHERE object_key = $1
@@ -25,8 +25,8 @@ DELETE FROM object_locations
 WHERE object_key = $1;
 
 -- name: InsertObjectLocation :exec
-INSERT INTO object_locations (object_key, backend_name, size_bytes, encrypted, encryption_key, key_id, plaintext_size, content_hash, compression_algorithm, compression_level, compression_format_version, logical_size, created_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW());
+INSERT INTO object_locations (object_key, backend_name, size_bytes, encrypted, encryption_key, key_id, plaintext_size, content_hash, compression_algorithm, compression_level, compression_format_version, logical_size, physical_key, object_version, created_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW());
 
 -- ListObjectsByBackend backs the rebalance, placement and drain candidate
 -- scans, so it returns managed rows only. Objects outside every configured
@@ -63,7 +63,7 @@ SELECT EXISTS(
 ) AS exists;
 
 -- name: LockObjectOnBackend :one
-SELECT size_bytes, encrypted, encryption_key, key_id, plaintext_size, content_hash
+SELECT size_bytes, encrypted, encryption_key, key_id, plaintext_size, content_hash, physical_key, object_version
 FROM object_locations
 WHERE object_key = $1 AND backend_name = $2
 FOR UPDATE;
@@ -87,14 +87,14 @@ ORDER BY object_key COLLATE "C", created_at ASC
 LIMIT @max_keys;
 
 -- name: GetAllObjectLocations :many
-SELECT object_key, backend_name, size_bytes, encrypted, encryption_key, key_id, plaintext_size, content_hash, compression_algorithm, compression_level, compression_format_version, logical_size, created_at, last_scrubbed_at
+SELECT object_key, backend_name, size_bytes, encrypted, encryption_key, key_id, plaintext_size, content_hash, compression_algorithm, compression_level, compression_format_version, logical_size, physical_key, object_version, created_at, last_scrubbed_at
 FROM object_locations
 WHERE object_key = $1
 ORDER BY created_at ASC;
 
 -- name: InsertObjectLocationIfNotExists :one
-INSERT INTO object_locations (object_key, backend_name, size_bytes, encrypted, encryption_key, key_id, plaintext_size, content_hash, compression_algorithm, compression_level, compression_format_version, logical_size, managed, created_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW())
+INSERT INTO object_locations (object_key, backend_name, size_bytes, encrypted, encryption_key, key_id, plaintext_size, content_hash, compression_algorithm, compression_level, compression_format_version, logical_size, physical_key, object_version, managed, created_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, NOW())
 ON CONFLICT (object_key, backend_name) DO NOTHING
 RETURNING true AS inserted;
 
@@ -304,7 +304,7 @@ WHERE object_key = $1 AND backend_name = $2;
 -- can delete the rows and decrement the corresponding backend quotas
 -- atomically. Used by the batch-delete path so an N-key request is one
 -- transaction instead of N.
-SELECT object_key, backend_name, size_bytes
+SELECT object_key, backend_name, size_bytes, physical_key
 FROM object_locations
 WHERE object_key = ANY(@object_keys::text[])
 FOR UPDATE;

@@ -24,10 +24,24 @@ import (
 	"github.com/afreidah/s3-orchestrator/internal/observe/logfmt"
 	"github.com/afreidah/s3-orchestrator/internal/proxy"
 	"github.com/afreidah/s3-orchestrator/internal/transport/admin"
+	"github.com/afreidah/s3-orchestrator/internal/transport/directapi"
 	"github.com/afreidah/s3-orchestrator/internal/transport/httputil"
 	"github.com/afreidah/s3-orchestrator/internal/transport/s3api"
 	"github.com/afreidah/s3-orchestrator/internal/transport/ui"
 )
+
+func registerDirectUploadHandler(mux *http.ServeMux, inj do.Injector, cfg *config.Config) error {
+	if !cfg.DirectUpload.Enabled {
+		return nil
+	}
+	h, err := do.Invoke[*directapi.Handler](inj)
+	if err != nil {
+		return fmt.Errorf("initialize direct upload handler: %w", err)
+	}
+	h.Register(mux)
+	slog.InfoContext(context.Background(), "direct upload API enabled", logfmt.Component("httpserver"), "path", "/v1/uploads")
+	return nil
+}
 
 // registerAdminHandler mounts the admin API at /admin/ when the admin key is
 // configured. Returns nil silently when the admin surface is disabled.

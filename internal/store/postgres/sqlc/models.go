@@ -16,6 +16,11 @@ type BackendQuota struct {
 	OrphanBytes int64
 }
 
+type BackendQuotaGroup struct {
+	BackendName string
+	QuotaGroup  string
+}
+
 type BackendUsage struct {
 	BackendName  string
 	Period       string
@@ -23,6 +28,18 @@ type BackendUsage struct {
 	EgressBytes  int64
 	IngressBytes int64
 	UpdatedAt    pgtype.Timestamptz
+}
+
+type CapacityReservation struct {
+	ID          string
+	SessionID   string
+	QuotaGroup  string
+	BackendName string
+	Bytes       int64
+	Status      string
+	ExpiresAt   pgtype.Timestamptz
+	CreatedAt   pgtype.Timestamptz
+	UpdatedAt   pgtype.Timestamptz
 }
 
 type CleanupDlq struct {
@@ -102,6 +119,8 @@ type ObjectLocation struct {
 	CompressionLevel         *string
 	CompressionFormatVersion *int16
 	LogicalSize              *int64
+	PhysicalKey              *string
+	ObjectVersion            *string
 }
 
 type PendingObject struct {
@@ -119,4 +138,34 @@ type PendingObject struct {
 	CompressionLevel         *string
 	CompressionFormatVersion *int16
 	LogicalSize              *int64
+}
+
+type QuotaGroup struct {
+	Name               string
+	RawLimitBytes      int64
+	StaticBufferBytes  int64
+	DynamicBufferBytes int64
+	ReservedBytes      int64
+	DriftBytes         int64
+	BillingPolicy      string
+	UpdatedAt          pgtype.Timestamptz
+}
+
+type UploadSession struct {
+	ID             string
+	IdempotencyKey string
+	LogicalKey     string
+	PhysicalKey    string
+	BackendName    string
+	QuotaGroup     string
+	Status         string
+	DeclaredBytes  int64
+	ReservedBytes  int64
+	ActualBytes    *int64
+	ContentType    *string
+	Etag           *string
+	ExpiresAt      pgtype.Timestamptz
+	CreatedAt      pgtype.Timestamptz
+	UpdatedAt      pgtype.Timestamptz
+	LastError      *string
 }

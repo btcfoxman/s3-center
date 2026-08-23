@@ -35,7 +35,12 @@ func (s *Store) GetAllObjectLocations(ctx context.Context, key string) ([]core.O
 		return nil, core.ErrObjectNotFound
 	}
 
-	return toVerifiableObjectLocations(rows), nil
+	locs := toVerifiableObjectLocations(rows)
+	for i := range rows {
+		locs[i].PhysicalKey = derefStr(rows[i].PhysicalKey)
+		locs[i].ObjectVersion = derefStr(rows[i].ObjectVersion)
+	}
+	return locs, nil
 }
 
 // GetObjectBackendsForKeys returns a map from each supplied object_key to

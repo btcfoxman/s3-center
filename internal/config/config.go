@@ -41,6 +41,10 @@ const (
 
 	// RoutingSpread distributes writes across backends by utilization ratio.
 	RoutingSpread RoutingStrategy = "spread"
+
+	// RoutingRiskAwarePack keeps ordinary proxy writes pack-compatible while
+	// direct uploads use quota-group reservations and safety buffers.
+	RoutingRiskAwarePack RoutingStrategy = "risk_aware_pack"
 )
 
 // -------------------------------------------------------------------------
@@ -72,6 +76,7 @@ type Config struct {
 	Redis                 *RedisConfig                `yaml:"redis"`
 	Notifications         NotificationConfig          `yaml:"notifications"`
 	Debug                 DebugConfig                 `yaml:"debug"`
+	DirectUpload          DirectUploadConfig          `yaml:"direct_upload"`
 	RoutingStrategy       RoutingStrategy             `yaml:"routing_strategy"` // "pack" (default) or "spread"
 }
 
@@ -140,6 +145,7 @@ func (c *Config) validatePerTypeSections() []error {
 	errs = append(errs, c.Cache.setDefaultsAndValidate()...)
 	errs = append(errs, c.Notifications.setDefaultsAndValidate()...)
 	errs = append(errs, c.Debug.FlightRecorder.setDefaultsAndValidate()...)
+	errs = append(errs, c.DirectUpload.setDefaultsAndValidate()...)
 	if c.Redis != nil {
 		errs = append(errs, c.Redis.setDefaultsAndValidate()...)
 	}
@@ -166,7 +172,7 @@ func (c *Config) applyDefaultsOnlyTypes() {
 // validateRoutingStrategy applies the default and enforces the enum.
 func (c *Config) validateRoutingStrategy() []error {
 	c.RoutingStrategy = cmp.Or(c.RoutingStrategy, RoutingPack)
-	if c.RoutingStrategy != RoutingPack && c.RoutingStrategy != RoutingSpread {
+	if c.RoutingStrategy != RoutingPack && c.RoutingStrategy != RoutingSpread && c.RoutingStrategy != RoutingRiskAwarePack {
 		return []error{ErrInvalidRoutingStrategy}
 	}
 	return nil

@@ -67,6 +67,7 @@ type KeyedExistingCopy struct {
 	ObjectKey   string
 	BackendName string
 	SizeBytes   int64
+	PhysicalKey string
 }
 
 // ObjectsTxAdapter exposes the transactional operations on the

@@ -69,6 +69,8 @@ type StoredForm struct {
 // not select them.
 type ObjectLocation struct {
 	ObjectKey                string
+	PhysicalKey              string
+	ObjectVersion            string
 	BackendName              string
 	SizeBytes                int64
 	CreatedAt                time.Time
@@ -90,6 +92,7 @@ type ObjectLocation struct {
 type ExistingCopy struct {
 	BackendName string
 	SizeBytes   int64
+	PhysicalKey string
 	CreatedAt   time.Time
 	// Encrypted and HasDEK describe whether this copy's row claims the bytes
 	// are an encryption envelope and whether the key needed to read them is
@@ -104,6 +107,7 @@ type ExistingCopy struct {
 type DeletedCopy struct {
 	BackendName string
 	SizeBytes   int64
+	PhysicalKey string
 }
 
 // -------------------------------------------------------------------------

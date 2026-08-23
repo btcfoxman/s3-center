@@ -111,4 +111,9 @@ var (
 	// already moved it to the DLQ or completed it. Callers treat this as
 	// a benign no-op rather than an error.
 	ErrCleanupItemNotFound = errors.New("cleanup queue row not found")
+
+	ErrUploadSessionNotFound = errors.New("upload session not found")
+	ErrUploadSessionExpired  = errors.New("upload session expired")
+	ErrUploadSessionConflict = errors.New("upload session is not active")
+	ErrUploadSizeMismatch    = errors.New("uploaded object size does not match reservation")
 )

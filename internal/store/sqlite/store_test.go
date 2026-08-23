@@ -64,9 +64,23 @@ func newTestStore(t *testing.T) *Store {
 //
 // Each additive migration therefore needs its columns undone here to be
 // rewound past.
+//
+//nolint:gocognit // Each schema boundary needs its inverse operations visible beside the migration tests.
 func rewindToSchemaVersion(t *testing.T, s *Store, version int) {
 	t.Helper()
 	ctx := context.Background()
+	if version < 8 {
+		for _, table := range []string{"capacity_reservations", "upload_sessions", "backend_quota_groups", "quota_groups"} {
+			if _, err := s.db.ExecContext(ctx, `DROP TABLE IF EXISTS `+table); err != nil {
+				t.Fatalf("drop %s: %v", table, err)
+			}
+		}
+		for _, column := range []string{"physical_key", "object_version"} {
+			if _, err := s.db.ExecContext(ctx, `ALTER TABLE object_locations DROP COLUMN `+column); err != nil {
+				t.Fatalf("drop object_locations.%s: %v", column, err)
+			}
+		}
+	}
 
 	if version < 7 {
 		for _, table := range []string{"object_locations", "pending_objects"} {

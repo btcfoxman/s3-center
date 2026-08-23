@@ -180,10 +180,14 @@ func displacedFromExisting(existing []ExistingCopy, newBackend string) []Deleted
 	}
 	var displaced []DeletedCopy
 	for _, ec := range existing {
-		if ec.BackendName != newBackend {
+		// A proxy PUT overwrites a legacy logical key in place. A direct-upload
+		// row uses an immutable physical key, so even a same-backend overwrite
+		// displaces bytes that must be cleaned up.
+		if ec.BackendName != newBackend || ec.PhysicalKey != "" {
 			displaced = append(displaced, DeletedCopy{
 				BackendName: ec.BackendName,
 				SizeBytes:   ec.SizeBytes,
+				PhysicalKey: ec.PhysicalKey,
 			})
 		}
 	}

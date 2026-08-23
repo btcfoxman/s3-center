@@ -37,6 +37,15 @@ import (
 // GetObject") in the same end-to-end trace.
 const managerSpanPrefix = "Manager "
 
+// physicalObjectKey resolves the backend key for a catalog location. Legacy
+// proxy uploads have no physical key and therefore retain their logical key.
+func physicalObjectKey(logical string, loc *core.ObjectLocation) string {
+	if loc != nil && loc.PhysicalKey != "" {
+		return loc.PhysicalKey
+	}
+	return logical
+}
+
 // ObjectStores is the narrow persistence surface object.Manager needs: object
 // CRUD + list, plus quota stats. Declared locally so the manager does
 // not pull in the full MetadataStore.

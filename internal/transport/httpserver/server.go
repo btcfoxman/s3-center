@@ -76,6 +76,9 @@ func New(deps Deps) (*Server, error) {
 	}
 
 	if deps.Mode.IsAPI() {
+		if err := registerDirectUploadHandler(mux, deps.Injector, deps.Cfg); err != nil {
+			return nil, err
+		}
 		if err := registerUIHandler(mux, deps.Injector, deps.Cfg); err != nil {
 			return nil, err
 		}

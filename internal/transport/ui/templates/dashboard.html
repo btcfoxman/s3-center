@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>S3 Orchestrator</title>
+  <title>S3 Center · 存储控制平面</title>
   <link rel="icon" type="image/svg+xml" href="static/favicon.svg">
   <link rel="stylesheet" href="static/style.css?v={{.Version}}">
 </head>
@@ -13,31 +13,33 @@
   <!-- Header -->
   <header>
     <div>
-      <h1>S3 Orchestrator</h1>
+      <div class="header-kicker">OBJECT CONTROL PLANE</div>
+      <h1>S3 Center</h1>
       <span class="meta">{{.Version}}</span>
     </div>
     <img src="static/logo.png" alt="S3 Orchestrator" class="header-logo">
     <div class="header-right">
       {{if .DBHealthy}}
-        <span class="badge badge-healthy">Healthy</span>
+        <span class="badge badge-healthy">运行正常</span>
       {{else}}
-        <span class="badge badge-degraded">Degraded</span>
+        <span class="badge badge-degraded">服务降级</span>
       {{end}}
-      <button class="btn-action" id="refresh-btn">Refresh</button>
-      <a href="logout" class="logout-link">Logout</a>
+      <a href="/direct/" class="btn-action direct-link">直传控制台</a>
+      <button class="btn-action" id="refresh-btn">刷新</button>
+      <a href="logout" class="logout-link">退出 / Logout</a>
     </div>
   </header>
 
   <!-- Storage Summary -->
   <section>
-    <h2>Storage Summary</h2>
+    <h2>存储概览 / Storage Summary</h2>
     <div class="config-grid">
       <div class="config-card">
-        <div class="label">Total Used</div>
+        <div class="label">已使用</div>
         <div class="value">{{formatBytes .TotalBytesUsed}}</div>
       </div>
       <div class="config-card">
-        <div class="label">Total Capacity</div>
+        <div class="label">总容量</div>
         <div class="value">
           {{- if eq .TotalBytesLimit 0}}unlimited
           {{- else}}{{formatBytes .TotalBytesLimit}}
@@ -45,12 +47,12 @@
         </div>
       </div>
       <div class="config-card">
-        <div class="label">Usage</div>
+        <div class="label">利用率</div>
         <div class="value">{{pct .TotalBytesUsed .TotalBytesLimit}}</div>
       </div>
       {{if ne .TotalOrphanBytes 0}}
       <div class="config-card">
-        <div class="label">Orphan Bytes</div>
+        <div class="label">待清理字节</div>
         <div class="value orphan-value">{{formatBytes .TotalOrphanBytes}}</div>
       </div>
       {{end}}
@@ -67,7 +69,7 @@
 
   <!-- Backends -->
   <section>
-    <h2>Backends
+    <h2>存储后端 / Backends
       <button id="rebalance-btn" class="btn-action" title="Move objects between backends to better match the configured routing strategy and even out space usage. Runs in the background; safe to trigger any time.">Rebalance</button>
       <button id="clean-excess-btn" class="btn-action" title="Delete extra object replicas that exceed the configured replication factor. Frees space without reducing redundancy below the target.">Clean Excess</button>
       <button id="sync-btn" class="btn-action" title="Scan a backend bucket and register objects that exist in storage but are missing from the orchestrator's metadata, mapping them into a virtual bucket.">Sync</button>

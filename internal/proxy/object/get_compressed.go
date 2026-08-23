@@ -73,7 +73,7 @@ func (o *Manager) compressedGetAttempt(ctx context.Context, key, rangeHeader, be
 		return fail, fmt.Errorf("backend %s: %w", beName, err)
 	}
 
-	fetcher := newStoredRangeFetcher(o.core, backend, o.encryptor, loc, key, beName)
+	fetcher := newStoredRangeFetcher(o.core, backend, o.encryptor, loc, physicalObjectKey(key, loc), beName)
 	reader, err := o.codec.DecompressRanged(ctx, fetcher, fetcher.compressedSize())
 	if err != nil {
 		telemetry.CompressionErrorsTotal.WithLabelValues(telemetry.CompressionOpDecode).Inc()

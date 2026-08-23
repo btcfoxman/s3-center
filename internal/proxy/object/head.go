@@ -40,7 +40,7 @@ func (o *Manager) HeadObject(ctx context.Context, key string) (*s3be.HeadObjectR
 				return fail, fmt.Errorf("backend %s: %w", beName, err)
 			}
 
-			r, err := o.core.HeadWithTimeout(ctx, backend, key)
+			r, err := o.core.HeadWithTimeout(ctx, backend, physicalObjectKey(key, loc))
 			if err != nil {
 				o.core.Acct().APICall(beName) // API call was made even on failure
 				return fail, err

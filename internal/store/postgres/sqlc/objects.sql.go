@@ -127,7 +127,7 @@ func (q *Queries) DeleteObjectsByKeys(ctx context.Context, objectKeys []string) 
 }
 
 const getAllObjectLocations = `-- name: GetAllObjectLocations :many
-SELECT object_key, backend_name, size_bytes, encrypted, encryption_key, key_id, plaintext_size, content_hash, compression_algorithm, compression_level, compression_format_version, logical_size, created_at, last_scrubbed_at
+SELECT object_key, backend_name, size_bytes, encrypted, encryption_key, key_id, plaintext_size, content_hash, compression_algorithm, compression_level, compression_format_version, logical_size, physical_key, object_version, created_at, last_scrubbed_at
 FROM object_locations
 WHERE object_key = $1
 ORDER BY created_at ASC
@@ -146,6 +146,8 @@ type GetAllObjectLocationsRow struct {
 	CompressionLevel         *string
 	CompressionFormatVersion *int16
 	LogicalSize              *int64
+	PhysicalKey              *string
+	ObjectVersion            *string
 	CreatedAt                pgtype.Timestamptz
 	LastScrubbedAt           pgtype.Timestamptz
 }
@@ -172,6 +174,8 @@ func (q *Queries) GetAllObjectLocations(ctx context.Context, objectKey string) (
 			&i.CompressionLevel,
 			&i.CompressionFormatVersion,
 			&i.LogicalSize,
+			&i.PhysicalKey,
+			&i.ObjectVersion,
 			&i.CreatedAt,
 			&i.LastScrubbedAt,
 		); err != nil {
@@ -186,7 +190,7 @@ func (q *Queries) GetAllObjectLocations(ctx context.Context, objectKey string) (
 }
 
 const getCopiesForKeysForUpdate = `-- name: GetCopiesForKeysForUpdate :many
-SELECT object_key, backend_name, size_bytes
+SELECT object_key, backend_name, size_bytes, physical_key
 FROM object_locations
 WHERE object_key = ANY($1::text[])
 FOR UPDATE
@@ -196,6 +200,7 @@ type GetCopiesForKeysForUpdateRow struct {
 	ObjectKey   string
 	BackendName string
 	SizeBytes   int64
+	PhysicalKey *string
 }
 
 // Returns (object_key, backend_name, size_bytes) for every row matching
@@ -212,7 +217,12 @@ func (q *Queries) GetCopiesForKeysForUpdate(ctx context.Context, objectKeys []st
 	items := []GetCopiesForKeysForUpdateRow{}
 	for rows.Next() {
 		var i GetCopiesForKeysForUpdateRow
-		if err := rows.Scan(&i.ObjectKey, &i.BackendName, &i.SizeBytes); err != nil {
+		if err := rows.Scan(
+			&i.ObjectKey,
+			&i.BackendName,
+			&i.SizeBytes,
+			&i.PhysicalKey,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -288,7 +298,7 @@ func (q *Queries) GetDirectoryStats(ctx context.Context, arg GetDirectoryStatsPa
 }
 
 const getExistingCopiesForUpdate = `-- name: GetExistingCopiesForUpdate :many
-SELECT backend_name, size_bytes, created_at, encrypted,
+SELECT backend_name, size_bytes, created_at, encrypted, physical_key,
        (encryption_key IS NOT NULL AND length(encryption_key) > 0) AS has_dek
 FROM object_locations
 WHERE object_key = $1
@@ -300,6 +310,7 @@ type GetExistingCopiesForUpdateRow struct {
 	SizeBytes   int64
 	CreatedAt   pgtype.Timestamptz
 	Encrypted   bool
+	PhysicalKey *string
 	HasDek      *bool
 }
 
@@ -317,6 +328,7 @@ func (q *Queries) GetExistingCopiesForUpdate(ctx context.Context, objectKey stri
 			&i.SizeBytes,
 			&i.CreatedAt,
 			&i.Encrypted,
+			&i.PhysicalKey,
 			&i.HasDek,
 		); err != nil {
 			return nil, err
@@ -510,8 +522,8 @@ func (q *Queries) GetObjectsWithoutHash(ctx context.Context, arg GetObjectsWitho
 }
 
 const insertObjectLocation = `-- name: InsertObjectLocation :exec
-INSERT INTO object_locations (object_key, backend_name, size_bytes, encrypted, encryption_key, key_id, plaintext_size, content_hash, compression_algorithm, compression_level, compression_format_version, logical_size, created_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW())
+INSERT INTO object_locations (object_key, backend_name, size_bytes, encrypted, encryption_key, key_id, plaintext_size, content_hash, compression_algorithm, compression_level, compression_format_version, logical_size, physical_key, object_version, created_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW())
 `
 
 type InsertObjectLocationParams struct {
@@ -527,6 +539,8 @@ type InsertObjectLocationParams struct {
 	CompressionLevel         *string
 	CompressionFormatVersion *int16
 	LogicalSize              *int64
+	PhysicalKey              *string
+	ObjectVersion            *string
 }
 
 func (q *Queries) InsertObjectLocation(ctx context.Context, arg InsertObjectLocationParams) error {
@@ -543,13 +557,15 @@ func (q *Queries) InsertObjectLocation(ctx context.Context, arg InsertObjectLoca
 		arg.CompressionLevel,
 		arg.CompressionFormatVersion,
 		arg.LogicalSize,
+		arg.PhysicalKey,
+		arg.ObjectVersion,
 	)
 	return err
 }
 
 const insertObjectLocationIfNotExists = `-- name: InsertObjectLocationIfNotExists :one
-INSERT INTO object_locations (object_key, backend_name, size_bytes, encrypted, encryption_key, key_id, plaintext_size, content_hash, compression_algorithm, compression_level, compression_format_version, logical_size, managed, created_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW())
+INSERT INTO object_locations (object_key, backend_name, size_bytes, encrypted, encryption_key, key_id, plaintext_size, content_hash, compression_algorithm, compression_level, compression_format_version, logical_size, physical_key, object_version, managed, created_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, NOW())
 ON CONFLICT (object_key, backend_name) DO NOTHING
 RETURNING true AS inserted
 `
@@ -567,6 +583,8 @@ type InsertObjectLocationIfNotExistsParams struct {
 	CompressionLevel         *string
 	CompressionFormatVersion *int16
 	LogicalSize              *int64
+	PhysicalKey              *string
+	ObjectVersion            *string
 	Managed                  bool
 }
 
@@ -584,6 +602,8 @@ func (q *Queries) InsertObjectLocationIfNotExists(ctx context.Context, arg Inser
 		arg.CompressionLevel,
 		arg.CompressionFormatVersion,
 		arg.LogicalSize,
+		arg.PhysicalKey,
+		arg.ObjectVersion,
 		arg.Managed,
 	)
 	var inserted bool
@@ -1247,7 +1267,7 @@ func (q *Queries) LockObjectKeyForWrite(ctx context.Context, hashtext string) er
 }
 
 const lockObjectOnBackend = `-- name: LockObjectOnBackend :one
-SELECT size_bytes, encrypted, encryption_key, key_id, plaintext_size, content_hash
+SELECT size_bytes, encrypted, encryption_key, key_id, plaintext_size, content_hash, physical_key, object_version
 FROM object_locations
 WHERE object_key = $1 AND backend_name = $2
 FOR UPDATE
@@ -1265,6 +1285,8 @@ type LockObjectOnBackendRow struct {
 	KeyID         *string
 	PlaintextSize *int64
 	ContentHash   *string
+	PhysicalKey   *string
+	ObjectVersion *string
 }
 
 func (q *Queries) LockObjectOnBackend(ctx context.Context, arg LockObjectOnBackendParams) (LockObjectOnBackendRow, error) {
@@ -1277,6 +1299,8 @@ func (q *Queries) LockObjectOnBackend(ctx context.Context, arg LockObjectOnBacke
 		&i.KeyID,
 		&i.PlaintextSize,
 		&i.ContentHash,
+		&i.PhysicalKey,
+		&i.ObjectVersion,
 	)
 	return i, err
 }

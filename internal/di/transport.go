@@ -25,6 +25,7 @@ import (
 	"github.com/afreidah/s3-orchestrator/internal/compression"
 	"github.com/afreidah/s3-orchestrator/internal/config"
 	"github.com/afreidah/s3-orchestrator/internal/debug"
+	"github.com/afreidah/s3-orchestrator/internal/directupload"
 	"github.com/afreidah/s3-orchestrator/internal/lifecycle"
 	"github.com/afreidah/s3-orchestrator/internal/notify"
 	"github.com/afreidah/s3-orchestrator/internal/observe/logfmt"
@@ -41,11 +42,34 @@ import (
 	"github.com/afreidah/s3-orchestrator/internal/transport/admin"
 	"github.com/afreidah/s3-orchestrator/internal/transport/admin/adminapi"
 	"github.com/afreidah/s3-orchestrator/internal/transport/auth"
+	"github.com/afreidah/s3-orchestrator/internal/transport/directapi"
 	"github.com/afreidah/s3-orchestrator/internal/transport/httputil"
 	"github.com/afreidah/s3-orchestrator/internal/transport/s3api"
 	"github.com/afreidah/s3-orchestrator/internal/transport/ui"
 	"github.com/afreidah/s3-orchestrator/internal/worker"
 )
+
+// ProvideDirectUploadManager wires the capacity-reserved upload coordinator.
+func ProvideDirectUploadManager(i do.Injector) (*directupload.Manager, error) {
+	r := newResolver(i)
+	cfg := resolve[*config.Config](r)
+	stores := resolve[core.MetadataStore](r)
+	br := resolve[*BackendsResult](r)
+	if r.err != nil {
+		return nil, r.err
+	}
+	return directupload.New(cfg.DirectUpload, stores, br.Backends, br.Order, cfg.Buckets)
+}
+
+func ProvideDirectUploadHandler(i do.Injector) (*directapi.Handler, error) {
+	r := newResolver(i)
+	cfg := resolve[*config.Config](r)
+	manager := resolve[*directupload.Manager](r)
+	if r.err != nil {
+		return nil, r.err
+	}
+	return directapi.New(manager, cfg.DirectUpload), nil
+}
 
 // ProvideBucketAuth creates the credential-to-bucket registry.
 func ProvideBucketAuth(i do.Injector) (*auth.BucketRegistry, error) {

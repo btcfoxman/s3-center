@@ -97,7 +97,7 @@ func DeleteObject(ctx context.Context, runner Runner, key string) ([]DeletedCopy
 		copies := make([]DeletedCopy, len(existing))
 		deltas := make(map[string]int64, len(existing))
 		for i, ec := range existing {
-			copies[i] = DeletedCopy{BackendName: ec.BackendName, SizeBytes: ec.SizeBytes}
+			copies[i] = DeletedCopy{BackendName: ec.BackendName, SizeBytes: ec.SizeBytes, PhysicalKey: ec.PhysicalKey}
 			deltas[ec.BackendName] -= ec.SizeBytes
 		}
 		if err := applyQuotaDeltas(ctx, tx, deltas); err != nil {
@@ -145,6 +145,7 @@ func DeleteObjectsBatch(ctx context.Context, runner Runner, keys []string) (map[
 			copies[r.ObjectKey] = append(copies[r.ObjectKey], DeletedCopy{
 				BackendName: r.BackendName,
 				SizeBytes:   r.SizeBytes,
+				PhysicalKey: r.PhysicalKey,
 			})
 			deltas[r.BackendName] -= r.SizeBytes
 		}
