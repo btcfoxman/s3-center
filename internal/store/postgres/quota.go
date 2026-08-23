@@ -30,6 +30,8 @@ import (
 // SyncQuotaLimits ensures the backend_quotas table has entries for all configured
 // backends with their quota limits. Creates new entries or updates existing limits.
 // All updates happen in a single transaction for atomicity.
+//
+//nolint:gocognit // Backend and shared-group quota state must be synchronized as one ordered operation.
 func (s *Store) SyncQuotaLimits(ctx context.Context, backends []config.BackendConfig) error {
 	if err := s.withTx(ctx, func(qtx *db.Queries) error {
 		for i := range backends {

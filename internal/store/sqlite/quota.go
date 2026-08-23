@@ -107,6 +107,8 @@ func (s *Store) GetLeastUtilizedBackend(ctx context.Context, size int64, eligibl
 
 // SyncQuotaLimits ensures the backend_quotas table has entries for all configured
 // backends with their quota limits. Creates new entries or updates existing limits.
+//
+//nolint:gocognit // Backend and shared-group quota state must be synchronized in one transaction.
 func (s *Store) SyncQuotaLimits(ctx context.Context, backends []config.BackendConfig) error {
 	return s.withTx(ctx, func(tx *sql.Tx) error {
 		now := now()
