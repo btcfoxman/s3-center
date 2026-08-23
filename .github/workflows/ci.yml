@@ -272,7 +272,7 @@ jobs:
     # also run on main pushes, so coverage artifacts always exist here and the
     # scan re-analyses main (clearing fixed issues) without zeroing coverage.
     # PRs with no Go change still run (their gate has no coverage condition).
-    if: always() && github.actor != 'dependabot[bot]' && needs.test.result != 'failure' && needs.test.result != 'cancelled' && (github.event_name == 'pull_request' || github.event_name == 'push')
+    if: always() && vars.SONAR_ENABLED == 'true' && github.actor != 'dependabot[bot]' && needs.test.result != 'failure' && needs.test.result != 'cancelled' && (github.event_name == 'pull_request' || github.event_name == 'push')
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
         with:
@@ -330,7 +330,7 @@ jobs:
   # DOCKER IMAGES (push to main only)
   # ---------------------------------------------------------------------------
   docker:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.go == 'true'
+    if: github.repository == 'afreidah/s3-orchestrator' && github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.go == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     needs: [changes, lint, test, integration]
@@ -397,7 +397,7 @@ jobs:
           severity: CRITICAL,HIGH
 
   docker-webpage:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.web == 'true'
+    if: github.repository == 'afreidah/s3-orchestrator' && github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.web == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     needs: [changes]

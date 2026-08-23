@@ -121,6 +121,14 @@ func (s *Store) SyncQuotaLimits(ctx context.Context, backends []config.BackendCo
 				return fmt.Errorf("failed to sync quota for backend %s: %w", backends[i].Name, err)
 			}
 			b := backends[i]
+			group := b.QuotaGroup
+			if group == "" {
+				group = b.Name
+			}
+			billingPolicy := b.BillingPolicy
+			if billingPolicy == "" {
+				billingPolicy = "free_capped"
+			}
 			raw := b.RawLimitBytes
 			if raw == 0 {
 				raw = b.QuotaBytes
@@ -132,12 +140,12 @@ func (s *Store) SyncQuotaLimits(ctx context.Context, backends []config.BackendCo
 					static_buffer_bytes=excluded.static_buffer_bytes,
 					dynamic_buffer_bytes=excluded.dynamic_buffer_bytes,
 					billing_policy=excluded.billing_policy, updated_at=excluded.updated_at`,
-				b.QuotaGroup, raw, b.StaticBufferBytes, b.DynamicBufferBytes, b.BillingPolicy, now); err != nil {
-				return fmt.Errorf("sync quota group %s: %w", b.QuotaGroup, err)
+				group, raw, b.StaticBufferBytes, b.DynamicBufferBytes, billingPolicy, now); err != nil {
+				return fmt.Errorf("sync quota group %s: %w", group, err)
 			}
 			if _, err := tx.ExecContext(ctx, `
 				INSERT INTO backend_quota_groups (backend_name, quota_group) VALUES (?, ?)
-				ON CONFLICT(backend_name) DO UPDATE SET quota_group=excluded.quota_group`, b.Name, b.QuotaGroup); err != nil {
+				ON CONFLICT(backend_name) DO UPDATE SET quota_group=excluded.quota_group`, b.Name, group); err != nil {
 				return fmt.Errorf("map backend %s to quota group: %w", b.Name, err)
 			}
 		}
