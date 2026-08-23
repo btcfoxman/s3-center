@@ -103,3 +103,50 @@ jobs:
              IMAGE_REGISTRY='$IMAGE_REGISTRY' IMAGE_NAMESPACE='$IMAGE_NAMESPACE' IMAGE_NAME='$IMAGE_NAME' IMAGE_TAG='$IMAGE_TAG' docker compose up -d && \
              for i in \$(seq 1 30); do curl -fsS http://127.0.0.1:48080/health/ready && exit 0; sleep 2; done; \
              docker compose ps; docker compose logs --tail=120 '$DEPLOY_SERVICE'; exit 1"
+
+      - name: Configure Cloudflare Tunnel routes
+        shell: bash
+        env:
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          api="https://api.cloudflare.com/client/v4"
+          auth="Authorization: Bearer $CF_API_TOKEN"
+
+          tunnel_id="$(curl -fsS "$api/accounts/$CF_ACCOUNT_ID/cfd_tunnel?name=s3-center-production&is_deleted=false" \
+            -H "$auth" | jq -er '.result[0].id')"
+
+          jq -n '{config:{ingress:[
+            {hostname:"s3-center.aiid.qzz.io",service:"http://app:9000"},
+            {hostname:"s3-api.aiid.qzz.io",service:"http://app:9000"},
+            {service:"http_status:404"}
+          ]}}' | curl -fsS "$api/accounts/$CF_ACCOUNT_ID/cfd_tunnel/$tunnel_id/configurations" \
+            -X PUT -H "$auth" -H 'Content-Type: application/json' --data-binary @- \
+            | jq -e '.success == true' >/dev/null
+
+          zone_id="$(curl -fsS "$api/zones?name=aiid.qzz.io" -H "$auth" | jq -er '.result[0].id')"
+          for hostname in s3-center.aiid.qzz.io s3-api.aiid.qzz.io; do
+            record_id="$(curl -fsS "$api/zones/$zone_id/dns_records?type=CNAME&name=$hostname" \
+              -H "$auth" | jq -r '.result[0].id // empty')"
+            payload="$(jq -n --arg name "$hostname" --arg content "$tunnel_id.cfargotunnel.com" \
+              '{type:"CNAME",name:$name,content:$content,proxied:true,ttl:1}')"
+            if [[ -n "$record_id" ]]; then
+              curl -fsS "$api/zones/$zone_id/dns_records/$record_id" -X PATCH \
+                -H "$auth" -H 'Content-Type: application/json' --data "$payload" \
+                | jq -e '.success == true' >/dev/null
+            else
+              curl -fsS "$api/zones/$zone_id/dns_records" -X POST \
+                -H "$auth" -H 'Content-Type: application/json' --data "$payload" \
+                | jq -e '.success == true' >/dev/null
+            fi
+          done
+
+      - name: Verify public endpoint
+        shell: bash
+        run: |
+          for i in $(seq 1 30); do
+            curl -fsS https://s3-api.aiid.qzz.io/health/ready && exit 0
+            sleep 2
+          done
+          exit 1
