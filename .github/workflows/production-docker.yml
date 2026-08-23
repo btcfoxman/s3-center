@@ -80,7 +80,12 @@ jobs:
           DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
         run: |
           ssh -i ~/.ssh/deploy_key -p "${DEPLOY_PORT:-22}" "$DEPLOY_USER@$DEPLOY_HOST" "mkdir -p '$DEPLOY_PATH'"
-          rsync -az --delete --exclude .env -e "ssh -i ~/.ssh/deploy_key -p ${DEPLOY_PORT:-22}" deploy/production/ "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/"
+          scp -i ~/.ssh/deploy_key -P "${DEPLOY_PORT:-22}" \
+            deploy/production/docker-compose.yml \
+            deploy/production/config.yaml \
+            deploy/production/.env.example \
+            deploy/production/README.md \
+            "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/"
 
       - name: Deploy and verify
         shell: bash
