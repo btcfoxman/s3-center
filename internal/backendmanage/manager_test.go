@@ -16,7 +16,7 @@ func TestDefinitionCipherRoundTripAndAAD(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	definition, err := buildDefinition(CreateRequest{
+	definition, err := buildDefinition(&CreateRequest{
 		Name: "r2-team-02", AccountLabel: "Team 02",
 		AccountID: strings.Repeat("a", 32), Bucket: "team-assets",
 		AccessKeyID: "access-key", SecretAccessKey: "top-secret-value",
@@ -46,7 +46,7 @@ func TestDefinitionCipherRoundTripAndAAD(t *testing.T) {
 
 func TestBuildDefinitionCloudflareDefaults(t *testing.T) {
 	t.Parallel()
-	definition, err := buildDefinition(CreateRequest{
+	definition, err := buildDefinition(&CreateRequest{
 		Name: "r2-eu", AccountID: strings.Repeat("b", 32), Jurisdiction: "eu",
 		Bucket: "eu-assets", AccessKeyID: "key", SecretAccessKey: "secret",
 	}, 1234, 75)
@@ -65,10 +65,12 @@ func TestBuildDefinitionCloudflareDefaults(t *testing.T) {
 	}
 }
 
+//nolint:gosec // Deliberate fake credential verifies browser redaction.
 func TestViewRedactsProxyCredentials(t *testing.T) {
 	t.Parallel()
-	view := viewOf(Definition{Backend: config.BackendConfig{
-		Name: "b", ProxyURL: "http://user:password@203.0.113.7:3128",
+	view := viewOf(&Definition{Backend: config.BackendConfig{
+		Name:     "b",
+		ProxyURL: "http://user:password@203.0.113.7:3128",
 	}})
 	if view.Proxy != "http://203.0.113.7:3128" {
 		t.Fatalf("redacted proxy = %q", view.Proxy)

@@ -60,7 +60,7 @@ func ProvideDirectUploadManager(i do.Injector) (*directupload.Manager, error) {
 	if r.err != nil {
 		return nil, r.err
 	}
-	return directupload.NewWithFleet(cfg.DirectUpload, stores, runtime, cfg.Buckets)
+	return directupload.NewWithFleet(&cfg.DirectUpload, stores, runtime, cfg.Buckets)
 }
 
 func ProvideDirectUploadHandler(i do.Injector) (*directapi.Handler, error) {

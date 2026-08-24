@@ -28,7 +28,7 @@ func newDefinitionCipher(masterKey string) (*definitionCipher, error) {
 	return &definitionCipher{aead: aead}, nil
 }
 
-func (c *definitionCipher) seal(name string, definition Definition) ([]byte, error) {
+func (c *definitionCipher) seal(name string, definition *Definition) ([]byte, error) {
 	plain, err := json.Marshal(definition)
 	if err != nil {
 		return nil, fmt.Errorf("encode managed backend %q: %w", name, err)

@@ -27,7 +27,7 @@ func (h *Handler) handleAPIR2Accounts(w http.ResponseWriter, r *http.Request) {
 			httputil.WriteJSONError(w, http.StatusBadRequest, "invalid account definition")
 			return
 		}
-		view, err := h.backendManagement.Create(r.Context(), request)
+		view, err := h.backendManagement.Create(r.Context(), &request)
 		if err != nil {
 			status := http.StatusUnprocessableEntity
 			if strings.Contains(err.Error(), "already exists") {

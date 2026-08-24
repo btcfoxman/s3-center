@@ -74,34 +74,46 @@ func ProvideBackends(i do.Injector) (*BackendsResult, error) {
 	if err != nil {
 		return nil, err
 	}
+	definitions, err := loadBackendDefinitions(i, cfg)
+	if err != nil {
+		return nil, err
+	}
+	return initializeBackendFleet(cfg, definitions)
+}
 
+func loadBackendDefinitions(i do.Injector, cfg *config.Config) ([]backendmanage.Definition, error) {
 	definitions := make([]backendmanage.Definition, 0, len(cfg.Backends))
 	for idx := range cfg.Backends {
 		definitions = append(definitions, backendmanage.Definition{Version: 1, Backend: cfg.Backends[idx]})
 	}
-	if cfg.ManagedBackends.Enabled {
-		store, storeErr := do.Invoke[core.MetadataStore](i)
-		if storeErr != nil {
-			return nil, storeErr
-		}
-		managedStore, ok := store.(core.ManagedBackendStore)
-		if !ok {
-			return nil, fmt.Errorf("configured metadata store does not support managed backends")
-		}
-		managed, loadErr := backendmanage.Load(context.Background(), managedStore, cfg.ManagedBackends.MasterKey)
-		if loadErr != nil {
-			return nil, loadErr
-		}
-		definitions = append(definitions, managed...)
-		combined := make([]config.BackendConfig, 0, len(definitions))
-		for _, definition := range definitions {
-			combined = append(combined, definition.Backend)
-		}
-		if syncErr := store.SyncQuotaLimits(context.Background(), combined); syncErr != nil {
-			return nil, syncErr
-		}
+	if !cfg.ManagedBackends.Enabled {
+		return definitions, nil
 	}
+	store, err := do.Invoke[core.MetadataStore](i)
+	if err != nil {
+		return nil, err
+	}
+	managedStore, ok := store.(core.ManagedBackendStore)
+	if !ok {
+		return nil, fmt.Errorf("configured metadata store does not support managed backends")
+	}
+	ctx := context.Background()
+	managed, err := backendmanage.Load(ctx, managedStore, cfg.ManagedBackends.MasterKey)
+	if err != nil {
+		return nil, err
+	}
+	definitions = append(definitions, managed...)
+	combined := make([]config.BackendConfig, len(definitions))
+	for idx := range definitions {
+		combined[idx] = definitions[idx].Backend
+	}
+	if err := store.SyncQuotaLimits(ctx, combined); err != nil {
+		return nil, err
+	}
+	return definitions, nil
+}
 
+func initializeBackendFleet(cfg *config.Config, definitions []backendmanage.Definition) (*BackendsResult, error) {
 	backends := make(map[string]backend.ObjectBackend, len(definitions))
 	order := make([]string, 0, len(definitions))
 	limits := make(map[string]core.UsageLimits, len(definitions))

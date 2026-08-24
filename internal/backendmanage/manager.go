@@ -85,7 +85,7 @@ type Manager struct {
 
 	createMu    sync.Mutex
 	mu          sync.RWMutex
-	definitions map[string]Definition
+	definitions map[string]*Definition
 }
 
 type ManagerDeps struct {
@@ -105,10 +105,11 @@ func New(deps ManagerDeps) (*Manager, error) {
 		breakerRegistry:       deps.BreakerRegistry,
 		maxObjectSize:         deps.Config.Server.MaxObjectSize,
 		defaultWarningPercent: deps.Config.ManagedBackends.DefaultWarningPercent,
-		definitions:           make(map[string]Definition, len(deps.Definitions)),
+		definitions:           make(map[string]*Definition, len(deps.Definitions)),
 	}
-	for _, definition := range deps.Definitions {
-		m.definitions[definition.Backend.Name] = definition
+	for idx := range deps.Definitions {
+		definition := deps.Definitions[idx]
+		m.definitions[definition.Backend.Name] = &definition
 	}
 	if m.enabled {
 		cipher, err := newDefinitionCipher(deps.Config.ManagedBackends.MasterKey)
@@ -140,7 +141,7 @@ func (m *Manager) HasBackend(name string) bool {
 	return ok
 }
 
-func viewOf(definition Definition) View {
+func viewOf(definition *Definition) View {
 	b := definition.Backend
 	proxy := "直连"
 	if b.ProxyURL != "" {
@@ -156,7 +157,7 @@ func viewOf(definition Definition) View {
 	}
 }
 
-func (m *Manager) Create(ctx context.Context, request CreateRequest) (View, error) {
+func (m *Manager) Create(ctx context.Context, request *CreateRequest) (View, error) {
 	if !m.Enabled() {
 		return View{}, errors.New("managed backends are disabled")
 	}
@@ -228,7 +229,7 @@ func (m *Manager) Create(ctx context.Context, request CreateRequest) (View, erro
 	return viewOf(definition), nil
 }
 
-func buildDefinition(request CreateRequest, maxObjectSize int64, defaultWarningPercent int) (Definition, error) {
+func buildDefinition(request *CreateRequest, maxObjectSize int64, defaultWarningPercent int) (*Definition, error) {
 	request.Name = strings.TrimSpace(request.Name)
 	request.AccountLabel = strings.TrimSpace(request.AccountLabel)
 	request.AccountID = strings.ToLower(strings.TrimSpace(request.AccountID))
@@ -237,19 +238,19 @@ func buildDefinition(request CreateRequest, maxObjectSize int64, defaultWarningP
 	request.SecretAccessKey = strings.TrimSpace(request.SecretAccessKey)
 	request.ProxyURL = strings.TrimSpace(request.ProxyURL)
 	if !backendNamePattern.MatchString(request.Name) {
-		return Definition{}, errors.New("backend name must be 1-63 letters, numbers, dots, underscores, or hyphens")
+		return nil, errors.New("backend name must be 1-63 letters, numbers, dots, underscores, or hyphens")
 	}
 	if len(request.AccountLabel) > 80 {
-		return Definition{}, errors.New("account label must not exceed 80 characters")
+		return nil, errors.New("account label must not exceed 80 characters")
 	}
 	if !accountIDPattern.MatchString(request.AccountID) {
-		return Definition{}, errors.New("Cloudflare account ID must be 32 hexadecimal characters")
+		return nil, errors.New("cloudflare account ID must be 32 hexadecimal characters")
 	}
 	if !bucketNamePattern.MatchString(request.Bucket) {
-		return Definition{}, errors.New("R2 bucket name must be 3-63 lowercase letters, numbers, or hyphens")
+		return nil, errors.New("R2 bucket name must be 3-63 lowercase letters, numbers, or hyphens")
 	}
 	if request.AccessKeyID == "" || request.SecretAccessKey == "" {
-		return Definition{}, errors.New("R2 access key ID and secret access key are required")
+		return nil, errors.New("R2 access key ID and secret access key are required")
 	}
 	if request.ProxyURL != "" && !strings.Contains(request.ProxyURL, "://") {
 		request.ProxyURL = "http://" + request.ProxyURL
@@ -266,7 +267,7 @@ func buildDefinition(request CreateRequest, maxObjectSize int64, defaultWarningP
 		"us":      ".us.r2.cloudflarestorage.com",
 	}[strings.ToLower(strings.TrimSpace(request.Jurisdiction))]
 	if !ok {
-		return Definition{}, errors.New("unsupported R2 jurisdiction")
+		return nil, errors.New("unsupported R2 jurisdiction")
 	}
 	backendConfig := config.BackendConfig{
 		Name: request.Name, Provider: "cloudflare_r2", AccountID: request.AccountID,
@@ -280,9 +281,9 @@ func buildDefinition(request CreateRequest, maxObjectSize int64, defaultWarningP
 		ProxyURL: request.ProxyURL, WarningPercent: warning,
 	}
 	if err := config.NormalizeAndValidateBackend(&backendConfig); err != nil {
-		return Definition{}, err
+		return nil, err
 	}
-	return Definition{Version: definitionVersion, Backend: backendConfig, Managed: true}, nil
+	return &Definition{Version: definitionVersion, Backend: backendConfig, Managed: true}, nil
 }
 
 // Load decrypts every persisted definition during startup.

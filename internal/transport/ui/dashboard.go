@@ -68,64 +68,80 @@ type cloudflareAccountUsage struct {
 
 func cloudflareUsage(views []backendmanage.View, data *dashboard.Data) []cloudflareAccountUsage {
 	groups := make(map[string]*cloudflareAccountUsage)
-	for _, view := range views {
-		if view.Provider != "cloudflare_r2" && view.AccountID == "" {
-			continue
-		}
-		key := view.AccountID
-		if key == "" {
-			key = view.QuotaGroup
-		}
-		if key == "" {
-			key = view.Name
-		}
-		account := groups[key]
-		if account == nil {
-			label := view.AccountLabel
-			if label == "" {
-				label = view.Name
-			}
-			shortID := view.AccountID
-			if len(shortID) > 14 {
-				shortID = shortID[:6] + "…" + shortID[len(shortID)-6:]
-			}
-			account = &cloudflareAccountUsage{
-				Label: label, AccountIDShort: shortID, QuotaGroup: key, Proxy: view.Proxy,
-				FreeTierBytes: view.FreeTierBytes, AdmissibleBytes: view.AdmissibleBytes,
-				WarningPercent: view.WarningPercent, Managed: view.Managed,
-			}
-			groups[key] = account
-		} else if account.Proxy != view.Proxy {
-			account.Proxy = "混合出口"
-		}
-		account.Managed = account.Managed || view.Managed
-		account.Backends = append(account.Backends, view.Name)
-		account.Buckets = append(account.Buckets, view.Bucket)
-		stat := data.QuotaStats[view.Name]
-		account.UsedBytes += stat.BytesUsed + stat.OrphanBytes
-		account.OrphanBytes += stat.OrphanBytes
-		account.ObservedRequests += data.UsageStats[view.Name].APIRequests
+	for idx := range views {
+		mergeCloudflareUsage(groups, &views[idx], data)
 	}
 	result := make([]cloudflareAccountUsage, 0, len(groups))
 	for _, account := range groups {
-		sort.Strings(account.Backends)
-		sort.Strings(account.Buckets)
-		account.Buckets = slicesCompact(account.Buckets)
-		account.FreeRemainingBytes = max(0, account.FreeTierBytes-account.UsedBytes)
-		account.SafeRemainingBytes = max(0, account.AdmissibleBytes-account.UsedBytes)
-		if account.FreeTierBytes > 0 {
-			account.StoragePercent = float64(account.UsedBytes) / float64(account.FreeTierBytes) * 100
-		}
-		account.State = "healthy"
-		if account.FreeTierBytes > 0 && account.UsedBytes >= account.FreeTierBytes {
-			account.State = "critical"
-		} else if account.WarningPercent > 0 && account.StoragePercent >= float64(account.WarningPercent) {
-			account.State = "warning"
-		}
+		finalizeCloudflareUsage(account)
 		result = append(result, *account)
 	}
 	sort.Slice(result, func(i, j int) bool { return strings.Compare(result[i].Label, result[j].Label) < 0 })
 	return result
+}
+
+func mergeCloudflareUsage(groups map[string]*cloudflareAccountUsage, view *backendmanage.View, data *dashboard.Data) {
+	if view.Provider != "cloudflare_r2" && view.AccountID == "" {
+		return
+	}
+	key := cloudflareAccountKey(view)
+	account := groups[key]
+	if account == nil {
+		account = newCloudflareAccountUsage(view, key)
+		groups[key] = account
+	} else if account.Proxy != view.Proxy {
+		account.Proxy = "混合出口"
+	}
+	account.Managed = account.Managed || view.Managed
+	account.Backends = append(account.Backends, view.Name)
+	account.Buckets = append(account.Buckets, view.Bucket)
+	stat := data.QuotaStats[view.Name]
+	account.UsedBytes += stat.BytesUsed + stat.OrphanBytes
+	account.OrphanBytes += stat.OrphanBytes
+	account.ObservedRequests += data.UsageStats[view.Name].APIRequests
+}
+
+func cloudflareAccountKey(view *backendmanage.View) string {
+	if view.AccountID != "" {
+		return view.AccountID
+	}
+	if view.QuotaGroup != "" {
+		return view.QuotaGroup
+	}
+	return view.Name
+}
+
+func newCloudflareAccountUsage(view *backendmanage.View, key string) *cloudflareAccountUsage {
+	label := view.AccountLabel
+	if label == "" {
+		label = view.Name
+	}
+	shortID := view.AccountID
+	if len(shortID) > 14 {
+		shortID = shortID[:6] + "…" + shortID[len(shortID)-6:]
+	}
+	return &cloudflareAccountUsage{
+		Label: label, AccountIDShort: shortID, QuotaGroup: key, Proxy: view.Proxy,
+		FreeTierBytes: view.FreeTierBytes, AdmissibleBytes: view.AdmissibleBytes,
+		WarningPercent: view.WarningPercent, Managed: view.Managed,
+	}
+}
+
+func finalizeCloudflareUsage(account *cloudflareAccountUsage) {
+	sort.Strings(account.Backends)
+	sort.Strings(account.Buckets)
+	account.Buckets = slicesCompact(account.Buckets)
+	account.FreeRemainingBytes = max(0, account.FreeTierBytes-account.UsedBytes)
+	account.SafeRemainingBytes = max(0, account.AdmissibleBytes-account.UsedBytes)
+	if account.FreeTierBytes > 0 {
+		account.StoragePercent = float64(account.UsedBytes) / float64(account.FreeTierBytes) * 100
+	}
+	account.State = "healthy"
+	if account.FreeTierBytes > 0 && account.UsedBytes >= account.FreeTierBytes {
+		account.State = "critical"
+	} else if account.WarningPercent > 0 && account.StoragePercent >= float64(account.WarningPercent) {
+		account.State = "warning"
+	}
 }
 
 func slicesCompact(values []string) []string {

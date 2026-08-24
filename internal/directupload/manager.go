@@ -56,12 +56,12 @@ func (f staticFleet) BackendOrder() []string { return append([]string(nil), f.or
 
 //nolint:gocritic // The manager owns an immutable configuration snapshot.
 func New(cfg config.DirectUploadConfig, store core.MetadataStore, backends map[string]backend.ObjectBackend, order []string, buckets []config.BucketConfig) (*Manager, error) {
-	return NewWithFleet(cfg, store, staticFleet{backends: backends, order: order}, buckets)
+	return NewWithFleet(&cfg, store, staticFleet{backends: backends, order: order}, buckets)
 }
 
 // NewWithFleet binds the manager to a runtime registry so newly managed
 // backends immediately become direct-upload candidates.
-func NewWithFleet(cfg config.DirectUploadConfig, store core.MetadataStore, fleet Fleet, buckets []config.BucketConfig) (*Manager, error) {
+func NewWithFleet(cfg *config.DirectUploadConfig, store core.MetadataStore, fleet Fleet, buckets []config.BucketConfig) (*Manager, error) {
 	direct, ok := store.(core.DirectUploadStore)
 	if !ok {
 		return nil, fmt.Errorf("configured store does not support direct uploads")
@@ -70,7 +70,7 @@ func NewWithFleet(cfg config.DirectUploadConfig, store core.MetadataStore, fleet
 	for _, b := range buckets {
 		allowed[b.Name] = struct{}{}
 	}
-	return &Manager{cfg: cfg, store: direct, metadata: store, fleet: fleet, buckets: allowed, log: slog.Default().With("component", "direct_upload")}, nil
+	return &Manager{cfg: *cfg, store: direct, metadata: store, fleet: fleet, buckets: allowed, log: slog.Default().With("component", "direct_upload")}, nil
 }
 
 func newID() (string, error) {
