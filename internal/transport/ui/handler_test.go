@@ -394,8 +394,8 @@ func TestLogin_GET_ShowsForm(t *testing.T) {
 	}
 
 	body, _ := io.ReadAll(resp.Body)
-	if !strings.Contains(string(body), "Sign In") {
-		t.Error("login page should contain Sign In button")
+	if !strings.Contains(string(body), "进入控制台") {
+		t.Error("login page should contain the console sign-in button")
 	}
 }
 
@@ -638,16 +638,16 @@ func TestDashboard_Returns200HTML(t *testing.T) {
 		t.Errorf("Content-Type = %q, want text/html", ct)
 	}
 	body, _ := io.ReadAll(resp.Body)
-	if !strings.Contains(string(body), "S3 Orchestrator") {
+	if !strings.Contains(string(body), "S3 Center") {
 		t.Error("response body missing expected title")
 	}
-	if !strings.Contains(string(body), "Storage Summary") {
+	if !strings.Contains(string(body), "存储概览") {
 		t.Error("response body missing Storage Summary section")
 	}
-	if !strings.Contains(string(body), "Backends") {
+	if !strings.Contains(string(body), "存储后端") {
 		t.Error("response body missing Backends section")
 	}
-	if !strings.Contains(string(body), "Logout") {
+	if !strings.Contains(string(body), "退出") {
 		t.Error("response body missing Logout link")
 	}
 }
@@ -1708,11 +1708,11 @@ func TestAPILogs_SinceFilter(t *testing.T) {
 
 	old := time.Now().Add(-1 * time.Hour)
 	recent := time.Now()
-	h.logBuffer.Add(telemetry.LogEntry{Time: old, Level: "INFO", Message: "old"})
-	h.logBuffer.Add(telemetry.LogEntry{Time: recent, Level: "INFO", Message: "new"})
+	h.logBuffer.Add(telemetry.LogEntry{Time: old, Level: "INFO", Message: "old", Attrs: map[string]any{"component": "since-filter-test"}})
+	h.logBuffer.Add(telemetry.LogEntry{Time: recent, Level: "INFO", Message: "new", Attrs: map[string]any{"component": "since-filter-test"}})
 
 	since := time.Now().Add(-10 * time.Minute).Format(time.RFC3339)
-	req := authedRequest(t, h, mux, http.MethodGet, "/ui/api/logs?since="+since, nil)
+	req := authedRequest(t, h, mux, http.MethodGet, "/ui/api/logs?component=since-filter-test&since="+url.QueryEscape(since), nil)
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 
@@ -1793,11 +1793,11 @@ func TestAPILogs_BeforeFilter(t *testing.T) {
 
 	old := time.Now().Add(-1 * time.Hour)
 	recent := time.Now()
-	h.logBuffer.Add(telemetry.LogEntry{Time: old, Level: "INFO", Message: "old"})
-	h.logBuffer.Add(telemetry.LogEntry{Time: recent, Level: "INFO", Message: "new"})
+	h.logBuffer.Add(telemetry.LogEntry{Time: old, Level: "INFO", Message: "old", Attrs: map[string]any{"component": "before-filter-test"}})
+	h.logBuffer.Add(telemetry.LogEntry{Time: recent, Level: "INFO", Message: "new", Attrs: map[string]any{"component": "before-filter-test"}})
 
 	before := time.Now().Add(-10 * time.Minute).Format(time.RFC3339)
-	req := authedRequest(t, h, mux, http.MethodGet, "/ui/api/logs?before="+before, nil)
+	req := authedRequest(t, h, mux, http.MethodGet, "/ui/api/logs?component=before-filter-test&before="+url.QueryEscape(before), nil)
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 

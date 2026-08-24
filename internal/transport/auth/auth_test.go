@@ -16,6 +16,7 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -183,6 +184,54 @@ func signedRequestFor(tb testing.TB, accessKey, secret string) *http.Request {
 			", SignedHeaders=host;x-amz-content-sha256;x-amz-date"+
 			", Signature="+sig)
 	return r
+}
+
+// TestVerifySigV4_CloudflareAcceptEncodingNormalization covers Cloudflare's
+// origin-side Accept-Encoding rewrite. The client signs "identity", while the
+// origin receives "br, gzip" plus Cloudflare's two origin request headers.
+func TestVerifySigV4_CloudflareAcceptEncodingNormalization(t *testing.T) {
+	t.Parallel()
+	const (
+		accessKey = "AKIDCFTEST"
+		secret    = "cloudflare-normalization-test-secret" //nolint:gosec // test credential
+	)
+	r, err := http.NewRequestWithContext(context.Background(), http.MethodPut, "https://s3.example.com/assets/file.txt", strings.NewReader("payload"))
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	r.Host = "s3.example.com"
+	now := time.Now().UTC()
+	amzDate := now.Format("20060102T150405Z")
+	dateStamp := now.Format("20060102")
+	r.Header.Set("Accept-Encoding", "identity")
+	r.Header.Set("X-Amz-Date", amzDate)
+	r.Header.Set("X-Amz-Content-SHA256", hashSHA256([]byte("payload")))
+	signedHeaders := []string{"accept-encoding", "host", "x-amz-content-sha256", "x-amz-date"}
+	canonical := buildCanonicalRequest(r, slices.Clone(signedHeaders))
+	scope := dateStamp + "/us-east-1/s3/aws4_request"
+	stringToSign := "AWS4-HMAC-SHA256\n" + amzDate + "\n" + scope + "\n" + hashSHA256([]byte(canonical))
+	signingKey := deriveSigningKey(secret, dateStamp, "us-east-1", "s3")
+	signature := hex.EncodeToString(hmacSHA256(signingKey, []byte(stringToSign)))
+	r.Header.Set("Authorization",
+		"AWS4-HMAC-SHA256 Credential="+accessKey+"/"+scope+
+			", SignedHeaders="+strings.Join(signedHeaders, ";")+
+			", Signature="+signature)
+
+	// Simulate the exact header value Cloudflare forwards to the origin.
+	r.Header.Set("Accept-Encoding", "br, gzip")
+	r.Header.Set("CF-Ray", "test-ray-TPE")
+	r.Header.Set("CF-Connecting-IP", "203.0.113.10")
+	if err := VerifySigV4(r, accessKey, secret); err != nil {
+		t.Fatalf("VerifySigV4 behind Cloudflare: %v", err)
+	}
+
+	// The same mutation without Cloudflare's origin headers must not trigger
+	// the compatibility path.
+	r.Header.Del("CF-Ray")
+	r.Header.Del("CF-Connecting-IP")
+	if err := VerifySigV4(r, accessKey, secret); err == nil {
+		t.Fatal("VerifySigV4 accepted a mutated direct request")
+	}
 }
 
 // TestDeriveSigningKey_Deterministic verifies the same inputs produce

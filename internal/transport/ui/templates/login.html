@@ -7,23 +7,53 @@
   <link rel="icon" type="image/svg+xml" href="static/favicon.svg">
   <link rel="stylesheet" href="static/style.css?v={{.Version}}">
 </head>
-<body>
+<body class="login-page">
 <div class="login-wrapper">
-  <div class="login-card">
-    <div class="login-kicker">OBJECT CONTROL PLANE</div>
-    <h1>S3 Center</h1>
-    <span class="meta">{{.Version}}</span>
-    {{if .Error}}
-    <div class="login-error">{{.Error}}</div>
-    {{end}}
-    <form method="post" action="login">
-      <label for="access_key">访问密钥</label>
-      <input type="text" id="access_key" name="access_key" required autocomplete="username">
-      <label for="secret_key">密钥</label>
-      <input type="password" id="secret_key" name="secret_key" required autocomplete="current-password">
-      <button type="submit">进入管理面板 / Sign In</button>
-    </form>
-  </div>
+  <section class="login-story" aria-label="S3 Center 产品介绍">
+    <div class="brand-lockup">
+      <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
+      <span>S3 CENTER</span>
+    </div>
+    <div class="login-story-copy">
+      <span class="login-kicker">OBJECT STORAGE · ORCHESTRATED</span>
+      <h1>让每一份对象数据，<br><em>始终落在正确的位置。</em></h1>
+      <p>统一管理多云存储、容量水位与对象生命周期。一个控制平面，掌握整个存储舰队。</p>
+    </div>
+    <div class="login-capabilities" aria-label="核心能力">
+      <div><b>01</b><span>多云路由<br><small>Multi-cloud routing</small></span></div>
+      <div><b>02</b><span>完整性巡检<br><small>Integrity control</small></span></div>
+      <div><b>03</b><span>容量编排<br><small>Capacity orchestration</small></span></div>
+    </div>
+    <div class="orbit-visual" aria-hidden="true">
+      <span class="orbit orbit-one"></span>
+      <span class="orbit orbit-two"></span>
+      <span class="orbit-core"></span>
+      <span class="orbit-node node-one"></span>
+      <span class="orbit-node node-two"></span>
+      <span class="orbit-node node-three"></span>
+    </div>
+  </section>
+
+  <main class="login-panel">
+    <div class="login-card">
+      <div class="login-card-heading">
+        <span class="login-kicker">SECURE OPERATOR ACCESS</span>
+        <h2>欢迎回来</h2>
+        <p>使用管理凭据进入存储控制台</p>
+      </div>
+      {{if .Error}}
+      <div class="login-error" role="alert">{{.Error}}</div>
+      {{end}}
+      <form method="post" action="login">
+        <label for="access_key">Access Key <span>访问密钥</span></label>
+        <input type="text" id="access_key" name="access_key" required autocomplete="username" autofocus placeholder="输入 Access Key">
+        <label for="secret_key">Secret Key <span>安全密钥</span></label>
+        <input type="password" id="secret_key" name="secret_key" required autocomplete="current-password" placeholder="输入 Secret Key">
+        <button type="submit"><span>进入控制台</span><b aria-hidden="true">↗</b></button>
+      </form>
+      <div class="login-footnote"><span class="status-dot"></span> 控制平面在线 <b>{{.Version}}</b></div>
+    </div>
+  </main>
 </div>
 </body>
 </html>

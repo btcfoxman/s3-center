@@ -7,39 +7,50 @@
   <link rel="icon" type="image/svg+xml" href="static/favicon.svg">
   <link rel="stylesheet" href="static/style.css?v={{.Version}}">
 </head>
-<body>
+<body class="dashboard-page">
+<div class="ambient ambient-a" aria-hidden="true"></div>
+<div class="ambient ambient-b" aria-hidden="true"></div>
 <div class="container">
 
   <!-- Header -->
-  <header>
-    <div>
-      <div class="header-kicker">OBJECT CONTROL PLANE</div>
-      <h1>S3 Center</h1>
-      <span class="meta">{{.Version}}</span>
+  <header class="topbar">
+    <div class="brand-lockup dashboard-brand">
+      <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
+      <div>
+        <div class="header-kicker">OBJECT CONTROL PLANE</div>
+        <h1>S3 Center</h1>
+        <span class="meta">STORAGE ORCHESTRATOR · {{.Version}}</span>
+      </div>
     </div>
-    <img src="static/logo.png" alt="S3 Orchestrator" class="header-logo">
     <div class="header-right">
       {{if .DBHealthy}}
-        <span class="badge badge-healthy">运行正常</span>
+        <span class="badge badge-healthy"><i></i> 系统在线</span>
       {{else}}
-        <span class="badge badge-degraded">服务降级</span>
+        <span class="badge badge-degraded"><i></i> 服务降级</span>
       {{end}}
-      <a href="/direct/" class="btn-action direct-link">直传控制台</a>
-      <button class="btn-action" id="refresh-btn">刷新</button>
-      <a href="logout" class="logout-link">退出 / Logout</a>
+      <a href="/direct/" class="btn-action direct-link"><span>直传控制台</span><b aria-hidden="true">↗</b></a>
+      <button class="btn-action icon-button" id="refresh-btn"><span>刷新数据</span><b aria-hidden="true">↻</b></button>
+      <a href="logout" class="logout-link">退出</a>
     </div>
   </header>
 
   <!-- Storage Summary -->
-  <section>
-    <h2>存储概览 / Storage Summary</h2>
-    <div class="config-grid">
-      <div class="config-card">
-        <div class="label">已使用</div>
+  <section class="overview-section">
+    <div class="section-heading">
+      <div>
+        <span class="section-index">01 · LIVE CAPACITY</span>
+        <h2>存储概览</h2>
+        <p>所有后端的实时容量与可用性汇总</p>
+      </div>
+      <div class="live-indicator"><i></i> LIVE</div>
+    </div>
+    <div class="config-grid overview-grid">
+      <div class="config-card metric-primary">
+        <div class="label">已使用 <span>USED</span></div>
         <div class="value">{{formatBytes .TotalBytesUsed}}</div>
       </div>
       <div class="config-card">
-        <div class="label">总容量</div>
+        <div class="label">总容量 <span>CAPACITY</span></div>
         <div class="value">
           {{- if eq .TotalBytesLimit 0}}unlimited
           {{- else}}{{formatBytes .TotalBytesLimit}}
@@ -47,12 +58,12 @@
         </div>
       </div>
       <div class="config-card">
-        <div class="label">利用率</div>
+        <div class="label">利用率 <span>UTILIZATION</span></div>
         <div class="value">{{pct .TotalBytesUsed .TotalBytesLimit}}</div>
       </div>
       {{if ne .TotalOrphanBytes 0}}
       <div class="config-card">
-        <div class="label">待清理字节</div>
+        <div class="label">待清理字节 <span>ORPHANED</span></div>
         <div class="value orphan-value">{{formatBytes .TotalOrphanBytes}}</div>
       </div>
       {{end}}
@@ -68,8 +79,14 @@
   </section>
 
   <!-- Backends -->
-  <section>
-    <h2>存储后端 / Backends
+  <section class="backends-section">
+    <div class="section-heading section-heading-actions">
+      <div>
+        <span class="section-index">02 · STORAGE FLEET</span>
+        <h2>存储后端</h2>
+        <p>查看后端水位，并执行编排与维护操作</p>
+      </div>
+      <div class="action-toolbar" aria-label="存储后端操作">
       <button id="rebalance-btn" class="btn-action" title="Move objects between backends to better match the configured routing strategy and even out space usage. Runs in the background; safe to trigger any time.">Rebalance</button>
       <button id="clean-excess-btn" class="btn-action" title="Delete extra object replicas that exceed the configured replication factor. Frees space without reducing redundancy below the target.">Clean Excess</button>
       <button id="sync-btn" class="btn-action" title="Scan a backend bucket and register objects that exist in storage but are missing from the orchestrator's metadata, mapping them into a virtual bucket.">Sync</button>
@@ -86,7 +103,8 @@
       <button id="decompress-existing-btn" class="btn-action" title="Rewrite every compressed object back to the bytes the client wrote. Long-running.">Decompress Existing</button>
       {{end}}
       <span id="admin-action-status" class="admin-action-status"></span>
-    </h2>
+      </div>
+    </div>
     <table>
       <thead>
         <tr>
@@ -190,8 +208,14 @@
   {{end}}
 
   <!-- Monthly Usage -->
-  <section>
-    <h2>Monthly Usage ({{.Data.UsagePeriod}})</h2>
+  <section class="usage-section">
+    <div class="section-heading">
+      <div>
+        <span class="section-index">03 · TRAFFIC METER</span>
+        <h2>本月用量</h2>
+        <p>{{.Data.UsagePeriod}} · API 请求与数据流量</p>
+      </div>
+    </div>
     <table>
       <thead>
         <tr>
@@ -235,11 +259,17 @@
   </section>
 
   <!-- Objects -->
-  <section>
-    <h2>Objects</h2>
-    <div class="upload-bar">
-      <button id="upload-btn" class="btn-upload">Upload</button>
-      <span id="upload-status"></span>
+  <section class="objects-section">
+    <div class="section-heading section-heading-actions">
+      <div>
+        <span class="section-index">04 · OBJECT BROWSER</span>
+        <h2>对象浏览器</h2>
+        <p>浏览、上传与维护虚拟存储桶中的对象</p>
+      </div>
+      <div class="upload-bar">
+        <button id="upload-btn" class="btn-upload"><span>上传对象</span><b aria-hidden="true">＋</b></button>
+        <span id="upload-status"></span>
+      </div>
     </div>
     <input type="file" id="upload-files-input" aria-label="Upload files" multiple hidden>
     <input type="file" id="upload-folder-input" aria-label="Upload folder" webkitdirectory hidden>
@@ -272,8 +302,14 @@
   </section>
 
   <!-- Configuration -->
-  <section>
-    <h2>Configuration</h2>
+  <section class="configuration-section">
+    <div class="section-heading">
+      <div>
+        <span class="section-index">05 · RUNTIME PROFILE</span>
+        <h2>运行配置</h2>
+        <p>当前生效的路由、冗余与数据保护策略</p>
+      </div>
+    </div>
     <div class="config-grid">
       <div class="config-card">
         <div class="label">Virtual Buckets</div>
@@ -335,8 +371,14 @@
   </section>
 
   <!-- Logs -->
-  <section>
-    <h2>Logs
+  <section class="logs-section">
+    <div class="section-heading section-heading-actions">
+      <div>
+        <span class="section-index">06 · EVENT STREAM</span>
+        <h2>运行日志</h2>
+        <p>筛选并检查最近的控制平面事件</p>
+      </div>
+      <div class="logs-toolbar">
       <button id="logs-refresh" class="btn-action">Refresh</button>
       <label class="logs-auto-label"><input type="checkbox" id="logs-auto"> Auto</label>
       <select id="logs-level" class="logs-level-select" aria-label="Filter logs by level">
@@ -346,7 +388,8 @@
         <option value="WARN">Warn</option>
         <option value="ERROR">Error</option>
       </select>
-    </h2>
+      </div>
+    </div>
     <input type="text" id="logs-search" class="logs-search" aria-label="Filter logs" placeholder="Filter logs...">
     <div id="logs-container" class="logs-container">
       <div class="tree-loading">Loading&hellip;</div>

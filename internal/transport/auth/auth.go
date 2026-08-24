@@ -282,11 +282,44 @@ func verifySigV4Parsed(r *http.Request, key keyMaterial, credential, signedHeade
 
 	canonicalRequest := buildCanonicalRequest(r, signedHeaders)
 	signingKey, err := verifySigV4Signature(canonicalRequest, signature, key, dateStamp, region, service, amzDate)
+	if err != nil && shouldRetryCloudflareAcceptEncoding(r, signedHeaders) {
+		// Cloudflare overwrites every proxied request's Accept-Encoding with
+		// "br, gzip" before forwarding it to the origin. AWS SDKs (notably
+		// aws-sdk-go-v2) sign their original "identity" value, so the origin
+		// cannot reconstruct the client's canonical request from the mutated
+		// header. Retry only for a request carrying Cloudflare's origin headers
+		// and exact normalized value. The fallback changes no authorization-
+		// relevant field: method, host, path, query, payload hash, date, and all
+		// other signed headers are still verified normally.
+		canonicalRequest = buildCanonicalRequestWithAcceptEncoding(r, signedHeaders, "identity")
+		signingKey, err = verifySigV4Signature(canonicalRequest, signature, key, dateStamp, region, service, amzDate)
+	}
 	if err != nil {
 		return nil, err
 	}
 	credScope := dateStamp + "/" + region + "/" + service + "/aws4_request"
 	return streamingMaterialFromRequest(r, signature, signingKey, credScope, amzDate)
+}
+
+// shouldRetryCloudflareAcceptEncoding detects Cloudflare's documented origin
+// request normalization without enabling the compatibility path for ordinary
+// direct traffic. Requiring both origin-only headers avoids treating a lone,
+// user-supplied Cf-Ray value as proof that the request traversed Cloudflare.
+func shouldRetryCloudflareAcceptEncoding(r *http.Request, signedHeaders []string) bool {
+	return slices.Contains(signedHeaders, "accept-encoding") &&
+		r.Header.Get("CF-Ray") != "" &&
+		r.Header.Get("CF-Connecting-IP") != "" &&
+		strings.EqualFold(strings.TrimSpace(r.Header.Get("Accept-Encoding")), "br, gzip")
+}
+
+// buildCanonicalRequestWithAcceptEncoding rebuilds the canonical request with
+// the pre-proxy value AWS SDKs sign. Cloning keeps the request immutable for
+// the handler and any middleware that inspects it after authentication.
+func buildCanonicalRequestWithAcceptEncoding(r *http.Request, signedHeaders []string, value string) string {
+	clone := r.Clone(r.Context())
+	clone.Header = r.Header.Clone()
+	clone.Header.Set("Accept-Encoding", value)
+	return buildCanonicalRequest(clone, slices.Clone(signedHeaders))
 }
 
 // parseSigV4Credential splits the SigV4 credential scope and validates the
