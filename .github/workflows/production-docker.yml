@@ -53,6 +53,8 @@ jobs:
           context: .
           push: true
           platforms: linux/amd64
+          build-args: |
+            VERSION=sha-${{ github.sha }}
           tags: |
             ${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
             ${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ env.IMAGE_NAME }}:latest
