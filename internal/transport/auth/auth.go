@@ -282,13 +282,13 @@ func verifySigV4Parsed(r *http.Request, key keyMaterial, credential, signedHeade
 
 	canonicalRequest := buildCanonicalRequest(r, signedHeaders)
 	signingKey, err := verifySigV4Signature(canonicalRequest, signature, key, dateStamp, region, service, amzDate)
-	if err != nil && shouldRetryCloudflareAcceptEncoding(r, signedHeaders) {
+	if err != nil && shouldRetryNormalizedAcceptEncoding(r, signedHeaders) {
 		// Cloudflare overwrites every proxied request's Accept-Encoding with
 		// "br, gzip" before forwarding it to the origin. AWS SDKs (notably
 		// aws-sdk-go-v2) sign their original "identity" value, so the origin
 		// cannot reconstruct the client's canonical request from the mutated
-		// header. Retry only for a request carrying Cloudflare's origin headers
-		// and exact normalized value. The fallback changes no authorization-
+		// header. Retry only for that exact normalized coding set. The fallback
+		// changes no authorization-
 		// relevant field: method, host, path, query, payload hash, date, and all
 		// other signed headers are still verified normally.
 		canonicalRequest = buildCanonicalRequestWithAcceptEncoding(r, signedHeaders, "identity")
@@ -301,15 +301,21 @@ func verifySigV4Parsed(r *http.Request, key keyMaterial, credential, signedHeade
 	return streamingMaterialFromRequest(r, signature, signingKey, credScope, amzDate)
 }
 
-// shouldRetryCloudflareAcceptEncoding detects Cloudflare's documented origin
-// request normalization without enabling the compatibility path for ordinary
-// direct traffic. Requiring both origin-only headers avoids treating a lone,
-// user-supplied Cf-Ray value as proof that the request traversed Cloudflare.
-func shouldRetryCloudflareAcceptEncoding(r *http.Request, signedHeaders []string) bool {
-	return slices.Contains(signedHeaders, "accept-encoding") &&
-		r.Header.Get("CF-Ray") != "" &&
-		r.Header.Get("CF-Connecting-IP") != "" &&
-		strings.EqualFold(strings.TrimSpace(r.Header.Get("Accept-Encoding")), "br, gzip")
+// shouldRetryNormalizedAcceptEncoding detects Cloudflare's documented origin
+// request normalization. Some tunnel configurations do not forward every CF-*
+// marker, so the exact two-coding value is the stable signal. Accept-Encoding
+// controls response compression only; accepting the SDK's signed "identity"
+// value does not relax authorization for the method, resource, or payload.
+func shouldRetryNormalizedAcceptEncoding(r *http.Request, signedHeaders []string) bool {
+	if !slices.Contains(signedHeaders, "accept-encoding") {
+		return false
+	}
+	parts := strings.Split(strings.ToLower(r.Header.Get("Accept-Encoding")), ",")
+	if len(parts) != 2 {
+		return false
+	}
+	first, second := strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1])
+	return (first == "br" && second == "gzip") || (first == "gzip" && second == "br")
 }
 
 // buildCanonicalRequestWithAcceptEncoding rebuilds the canonical request with

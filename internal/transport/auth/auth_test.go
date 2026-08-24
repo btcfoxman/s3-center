@@ -219,16 +219,12 @@ func TestVerifySigV4_CloudflareAcceptEncodingNormalization(t *testing.T) {
 
 	// Simulate the exact header value Cloudflare forwards to the origin.
 	r.Header.Set("Accept-Encoding", "br, gzip")
-	r.Header.Set("CF-Ray", "test-ray-TPE")
-	r.Header.Set("CF-Connecting-IP", "203.0.113.10")
 	if err := VerifySigV4(r, accessKey, secret); err != nil {
 		t.Fatalf("VerifySigV4 behind Cloudflare: %v", err)
 	}
 
-	// The same mutation without Cloudflare's origin headers must not trigger
-	// the compatibility path.
-	r.Header.Del("CF-Ray")
-	r.Header.Del("CF-Connecting-IP")
+	// Other mutations must not trigger the narrowly scoped compatibility path.
+	r.Header.Set("Accept-Encoding", "gzip")
 	if err := VerifySigV4(r, accessKey, secret); err == nil {
 		t.Fatal("VerifySigV4 accepted a mutated direct request")
 	}
