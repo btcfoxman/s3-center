@@ -362,6 +362,46 @@ section > h2 { margin-bottom: 1.25rem; }
 .bar-track { display: flex; width: 100%; height: 7px; overflow: hidden; margin-top: .25rem; border-radius: 999px; background: rgba(122, 157, 144, .16); }
 .bar-fill { height: 100%; flex-shrink: 0; border-radius: 999px; transition: width .35s; }
 .bar-orphan { background: var(--danger) !important; }
+
+/* Cloudflare account observatory */
+.cf-account-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(330px, 1fr)); gap: .8rem; }
+.cf-account-card {
+  position: relative;
+  overflow: hidden;
+  padding: 1.15rem;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background:
+    linear-gradient(145deg, rgba(26, 49, 44, .76), rgba(9, 22, 19, .84)),
+    radial-gradient(circle at 100% 0, rgba(114, 230, 180, .1), transparent 15rem);
+}
+.cf-account-card::after { position: absolute; top: 0; right: 0; width: 5rem; height: 5rem; content: ""; border-top: 1px solid rgba(114, 230, 180, .24); border-right: 1px solid rgba(114, 230, 180, .24); border-radius: 0 16px 0 100%; pointer-events: none; }
+.cf-account-card.state-warning { border-color: rgba(246, 200, 108, .42); background: linear-gradient(145deg, rgba(63, 50, 25, .55), rgba(18, 25, 20, .88)); }
+.cf-account-card.state-critical { border-color: rgba(255, 111, 114, .48); background: linear-gradient(145deg, rgba(70, 31, 33, .55), rgba(23, 20, 19, .9)); }
+.cf-account-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; }
+.cf-provider { display: inline-block; margin-bottom: .35rem; color: var(--mint); font-family: var(--mono); font-size: .58rem; font-weight: 750; letter-spacing: .15em; }
+.cf-account-head h3 { font-size: 1.05rem; font-weight: 580; letter-spacing: -.02em; }
+.cf-account-head code { color: var(--muted); font-family: var(--mono); font-size: .62rem; }
+.cf-state { position: relative; z-index: 1; padding: .28rem .55rem; border: 1px solid rgba(114, 230, 180, .25); border-radius: 999px; color: var(--mint); font-family: var(--mono); font-size: .58rem; }
+.state-warning .cf-state { border-color: rgba(246, 200, 108, .35); color: var(--amber); }
+.state-critical .cf-state { border-color: rgba(255, 111, 114, .38); color: var(--danger); }
+.cf-capacity-readout { display: flex; align-items: baseline; gap: .42rem; margin-top: 1.2rem; font-family: var(--mono); }
+.cf-capacity-readout strong { color: var(--text); font-size: clamp(1.35rem, 2.5vw, 2rem); letter-spacing: -.07em; }
+.cf-capacity-readout span { color: var(--muted); font-size: .62rem; }
+.cf-capacity-readout b { margin-left: auto; color: var(--text-soft); font-size: .72rem; }
+.cf-meter { position: relative; height: 9px; overflow: hidden; margin-top: .65rem; border: 1px solid rgba(173, 226, 205, .08); border-radius: 999px; background: rgba(2, 10, 8, .7); }
+.cf-meter i { display: block; max-width: 100%; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #3ab583, var(--mint-bright)); box-shadow: 0 0 15px rgba(114, 230, 180, .3); }
+.state-warning .cf-meter i { background: linear-gradient(90deg, #b67c33, var(--amber)); }
+.state-critical .cf-meter i { background: linear-gradient(90deg, #a83f49, var(--danger)); }
+.cf-meter em { position: absolute; top: -3px; width: 1px; height: 15px; background: rgba(255, 255, 255, .7); box-shadow: 0 0 5px rgba(255, 255, 255, .45); }
+.cf-account-metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: .45rem; margin-top: 1rem; }
+.cf-account-metrics div { min-width: 0; padding: .65rem .7rem; border: 1px solid rgba(173, 226, 205, .09); border-radius: 10px; background: rgba(5, 16, 13, .42); }
+.cf-account-metrics span { display: block; color: var(--muted); font-size: .57rem; }
+.cf-account-metrics strong { display: block; overflow: hidden; margin-top: .15rem; color: var(--text-soft); font-family: var(--mono); font-size: .68rem; text-overflow: ellipsis; white-space: nowrap; }
+.cf-account-foot { display: flex; flex-wrap: wrap; gap: .4rem .8rem; margin-top: .85rem; color: var(--muted); font-family: var(--mono); font-size: .58rem; }
+.cf-managed { color: var(--mint) !important; }
+.cf-account-empty { grid-column: 1 / -1; padding: 2rem; border: 1px dashed var(--line-strong); border-radius: 15px; color: var(--muted); text-align: center; }
+.cf-account-note { margin-top: .9rem; color: var(--muted); font-size: .67rem; line-height: 1.7; }
 .section-heading-actions { align-items: center; }
 .action-toolbar, .logs-toolbar { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: .4rem; }
 .action-toolbar .btn-action, .logs-toolbar .btn-action { min-height: 31px; margin: 0; padding: 0 .65rem; font-family: var(--mono); font-size: .62rem; }
@@ -448,6 +488,26 @@ dialog { width: min(calc(100% - 2rem), 480px); margin: auto; padding: 1.4rem; bo
 dialog::backdrop { background: rgba(0, 7, 6, .78); backdrop-filter: blur(7px); }
 dialog#confirm-delete { max-width: 390px; }
 dialog#sync-dialog { max-width: 400px; }
+.account-dialog { width: min(calc(100% - 2rem), 760px); }
+.dialog-heading h2 { margin-top: .25rem; font-size: 1.45rem; font-weight: 560; letter-spacing: -.035em; }
+.dialog-heading p { margin-top: .35rem; color: var(--muted); font-size: .75rem; }
+.account-form-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: .75rem; margin-top: 1.15rem; }
+.account-form-grid label { display: block; color: var(--text-soft); font-family: var(--mono); font-size: .63rem; font-weight: 650; letter-spacing: .04em; }
+.account-form-grid label.span-2 { grid-column: span 2; }
+.account-form-grid input, .account-form-grid select { width: 100%; min-height: 43px; margin-top: .35rem; padding: 0 .75rem; border: 1px solid var(--line-strong); border-radius: 11px; background: rgba(20, 39, 36, .78); color: var(--text); font-family: var(--mono); font-size: .75rem; }
+.account-form-grid input:focus, .account-form-grid select:focus { border-color: rgba(114, 230, 180, .7); outline: 0; box-shadow: 0 0 0 4px rgba(114, 230, 180, .08); }
+.account-form-grid small { display: block; margin-top: .3rem; color: var(--muted); font-family: var(--sans); font-size: .62rem; font-weight: 400; letter-spacing: 0; }
+.range-label { position: relative; }
+.range-label output { float: right; color: var(--mint); }
+.range-label input[type="range"] { min-height: 22px; padding: 0; accent-color: var(--mint); }
+.account-security-note { display: grid; grid-template-columns: auto 1fr; gap: .75rem; margin-top: 1rem; padding: .75rem .85rem; border: 1px solid rgba(114, 230, 180, .18); border-radius: 11px; background: rgba(31, 76, 61, .2); }
+.account-security-note b { color: var(--mint); font-size: .68rem; white-space: nowrap; }
+.account-security-note span { color: var(--text-soft); font-size: .68rem; }
+.account-add-status { min-height: 1.35rem; margin-top: .8rem; color: var(--muted); font-size: .72rem; }
+.account-add-status.checking { color: var(--amber); }
+.account-add-status.success { color: var(--mint); }
+.account-add-status.error { color: var(--danger); }
+.dialog-actions .btn-primary { border-color: var(--mint) !important; background: var(--mint) !important; color: #06110e !important; font-weight: 750; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: .55rem; margin-top: 1.25rem; }
 .dialog-actions button { min-height: 38px; padding: 0 1rem; border: 1px solid var(--line-strong); border-radius: 10px; background: var(--panel-raised); color: var(--text-soft); cursor: pointer; font-size: .76rem; }
 .dialog-actions button:hover { border-color: rgba(114, 230, 180, .44); color: var(--mint); }
@@ -514,6 +574,11 @@ dialog input[type="text"], dialog select { min-height: 43px; padding: 0 .75rem; 
   .log-msg { overflow-wrap: anywhere; word-break: normal; }
   .log-attrs { display: none; }
   .log-entry-detail { padding-left: 1rem; }
+  .cf-account-grid { grid-template-columns: 1fr; }
+  .cf-account-metrics { grid-template-columns: 1fr; }
+  .account-form-grid { grid-template-columns: 1fr; }
+  .account-form-grid label.span-2 { grid-column: auto; }
+  .account-security-note { grid-template-columns: 1fr; }
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }

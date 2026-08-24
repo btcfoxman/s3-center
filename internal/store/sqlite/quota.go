@@ -30,17 +30,26 @@ func (s *Store) GetBackendWithSpace(ctx context.Context, size int64, backendOrde
 	for _, name := range backendOrder {
 		var available int64
 		err := s.db.QueryRowContext(ctx, `
-			SELECT CASE
-				WHEN q.bytes_limit = 0 THEN 9223372036854775807
-				ELSE (q.bytes_limit - q.bytes_used - q.orphan_bytes - COALESCE(m.inflight, 0))
-			END AS available
-			FROM backend_quotas q
-			LEFT JOIN (
+			WITH multipart_inflight AS (
 				SELECT mu.backend_name, SUM(mp.size_bytes) AS inflight
-				FROM multipart_uploads mu
-				JOIN multipart_parts mp ON mp.upload_id = mu.upload_id
+				FROM multipart_uploads mu JOIN multipart_parts mp ON mp.upload_id=mu.upload_id
 				GROUP BY mu.backend_name
-			) m ON m.backend_name = q.backend_name
+			)
+			SELECT MIN(
+				CASE WHEN q.bytes_limit=0 THEN 9223372036854775807
+					 ELSE q.bytes_limit-q.bytes_used-q.orphan_bytes-COALESCE(mi.inflight,0) END,
+				CASE WHEN g.raw_limit_bytes=0 THEN 9223372036854775807
+					 ELSE g.raw_limit_bytes-g.static_buffer_bytes-g.dynamic_buffer_bytes-g.reserved_bytes-g.drift_bytes-
+						COALESCE((SELECT SUM(b.bytes_used+b.orphan_bytes+COALESCE(bi.inflight,0))
+							FROM backend_quotas b
+							JOIN backend_quota_groups bm ON bm.backend_name=b.backend_name
+							LEFT JOIN multipart_inflight bi ON bi.backend_name=b.backend_name
+							WHERE bm.quota_group=g.name),0) END
+			) AS available
+			FROM backend_quotas q
+			LEFT JOIN multipart_inflight mi ON mi.backend_name=q.backend_name
+			JOIN backend_quota_groups bm ON bm.backend_name=q.backend_name
+			JOIN quota_groups g ON g.name=bm.quota_group
 			WHERE q.backend_name = ?`, name).Scan(&available)
 		if err == sql.ErrNoRows {
 			continue
@@ -73,18 +82,28 @@ func (s *Store) GetLeastUtilizedBackend(ctx context.Context, size int64, eligibl
 	}
 
 	const query = `
+		WITH multipart_inflight AS (
+			SELECT mu.backend_name, SUM(mp.size_bytes) AS inflight
+			FROM multipart_uploads mu JOIN multipart_parts mp ON mp.upload_id=mu.upload_id
+			GROUP BY mu.backend_name
+		)
 		SELECT q.backend_name
 		FROM backend_quotas q
-		LEFT JOIN (
-			SELECT mu.backend_name, SUM(mp.size_bytes) AS inflight
-			FROM multipart_uploads mu
-			JOIN multipart_parts mp ON mp.upload_id = mu.upload_id
-			GROUP BY mu.backend_name
-		) m ON m.backend_name = q.backend_name
+		LEFT JOIN multipart_inflight mi ON mi.backend_name=q.backend_name
+		JOIN backend_quota_groups bm ON bm.backend_name=q.backend_name
+		JOIN quota_groups g ON g.name=bm.quota_group
 		WHERE q.backend_name IN (SELECT value FROM json_each(?))
-		  AND CASE WHEN q.bytes_limit = 0 THEN 9223372036854775807
-		           ELSE (q.bytes_limit - q.bytes_used - q.orphan_bytes - COALESCE(m.inflight, 0))
-		      END >= ?
+		  AND MIN(
+			CASE WHEN q.bytes_limit=0 THEN 9223372036854775807
+				 ELSE q.bytes_limit-q.bytes_used-q.orphan_bytes-COALESCE(mi.inflight,0) END,
+			CASE WHEN g.raw_limit_bytes=0 THEN 9223372036854775807
+				 ELSE g.raw_limit_bytes-g.static_buffer_bytes-g.dynamic_buffer_bytes-g.reserved_bytes-g.drift_bytes-
+					COALESCE((SELECT SUM(b.bytes_used+b.orphan_bytes+COALESCE(bi.inflight,0))
+						FROM backend_quotas b
+						JOIN backend_quota_groups gm ON gm.backend_name=b.backend_name
+						LEFT JOIN multipart_inflight bi ON bi.backend_name=b.backend_name
+						WHERE gm.quota_group=g.name),0) END
+		  ) >= ?
 		ORDER BY CASE WHEN q.bytes_limit = 0 THEN 0.0
 		              ELSE CAST(q.bytes_used + q.orphan_bytes AS REAL) / CAST(q.bytes_limit AS REAL)
 		         END ASC

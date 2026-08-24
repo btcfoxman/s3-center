@@ -13,6 +13,14 @@ package core
 
 import "time"
 
+// ManagedBackendRecord is one opaque encrypted runtime backend definition.
+type ManagedBackendRecord struct {
+	Name            string
+	EncryptedConfig []byte
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+}
+
 // -------------------------------------------------------------------------
 // OBJECT METADATA
 // -------------------------------------------------------------------------

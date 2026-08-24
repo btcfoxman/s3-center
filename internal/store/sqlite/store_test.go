@@ -69,6 +69,11 @@ func newTestStore(t *testing.T) *Store {
 func rewindToSchemaVersion(t *testing.T, s *Store, version int) {
 	t.Helper()
 	ctx := context.Background()
+	if version < 9 {
+		if _, err := s.db.ExecContext(ctx, `DROP TABLE IF EXISTS managed_backends`); err != nil {
+			t.Fatalf("drop managed_backends: %v", err)
+		}
+	}
 	if version < 8 {
 		for _, table := range []string{"capacity_reservations", "upload_sessions", "backend_quota_groups", "quota_groups"} {
 			if _, err := s.db.ExecContext(ctx, `DROP TABLE IF EXISTS `+table); err != nil {
@@ -643,6 +648,33 @@ func TestGetBackendWithSpace(t *testing.T) {
 	}
 	if name != "backend-a" {
 		t.Errorf("expected backend-a (first with space), got %q", name)
+	}
+}
+
+func TestSharedQuotaGroupCapsNormalWritesAcrossBackends(t *testing.T) {
+	t.Parallel()
+	s := newTestStore(t)
+	ctx := context.Background()
+	backends := []config.BackendConfig{
+		{Name: "account-bucket-a", QuotaBytes: 800, QuotaGroup: "cf-account", RawLimitBytes: 1000, StaticBufferBytes: 100, DynamicBufferBytes: 100},
+		{Name: "account-bucket-b", QuotaBytes: 800, QuotaGroup: "cf-account", RawLimitBytes: 1000, StaticBufferBytes: 100, DynamicBufferBytes: 100},
+	}
+	if err := s.SyncQuotaLimits(ctx, backends); err != nil {
+		t.Fatal(err)
+	}
+	mustRecordObject(t, s, "bucket/first", "account-bucket-a", 500)
+
+	if _, err := s.GetBackendWithSpace(ctx, 301, []string{"account-bucket-b"}); !errors.Is(err, core.ErrNoSpaceAvailable) {
+		t.Fatalf("group-overflow placement error = %v, want ErrNoSpaceAvailable", err)
+	}
+	if name, err := s.GetBackendWithSpace(ctx, 300, []string{"account-bucket-b"}); err != nil || name != "account-bucket-b" {
+		t.Fatalf("group-boundary placement = %q, %v", name, err)
+	}
+	if _, err := s.GetLeastUtilizedBackend(ctx, 301, []string{"account-bucket-b"}); !errors.Is(err, core.ErrNoSpaceAvailable) {
+		t.Fatalf("group-overflow spread placement error = %v, want ErrNoSpaceAvailable", err)
+	}
+	if _, err := s.RecordObject(ctx, "bucket/overflow", "account-bucket-b", 301, nil); !errors.Is(err, core.ErrNoSpaceAvailable) {
+		t.Fatalf("group-overflow commit error = %v, want ErrNoSpaceAvailable", err)
 	}
 }
 

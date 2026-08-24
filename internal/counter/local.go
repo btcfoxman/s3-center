@@ -185,3 +185,13 @@ func (l *LocalCounterBackend) get(backend string) *localCounters {
 	l.mu.RUnlock()
 	return c
 }
+
+// RegisterBackend starts tracking a runtime-added backend without disturbing
+// counters already accumulated for the existing fleet.
+func (l *LocalCounterBackend) RegisterBackend(name string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if _, exists := l.counters[name]; !exists {
+		l.counters[name] = &localCounters{}
+	}
+}

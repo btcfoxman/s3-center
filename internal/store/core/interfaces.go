@@ -220,6 +220,15 @@ type UsageFlusher interface {
 	FlushUsageDeltas(ctx context.Context, backendName, period string, apiRequests, egressBytes, ingressBytes int64) error
 }
 
+// ManagedBackendStore persists encrypted backend definitions created through
+// the admin UI. The storage layer deliberately treats the payload as opaque;
+// encryption and schema evolution belong to the backend-management service.
+type ManagedBackendStore interface {
+	ListManagedBackends(ctx context.Context) ([]ManagedBackendRecord, error)
+	UpsertManagedBackend(ctx context.Context, name string, encryptedConfig []byte) error
+	DeleteManagedBackend(ctx context.Context, name string) error
+}
+
 // AdvisoryLocker defines the leader-election helper used by background
 // services. SQLite implementations no-op since the engine serializes
 // writers; on Postgres this is pg_try_advisory_lock with the supplied

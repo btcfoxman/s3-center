@@ -161,6 +161,21 @@ func (u *UsageTracker) GetLimits() map[string]core.UsageLimits {
 	return cp
 }
 
+// RegisterBackend installs limits and initializes the underlying counter when
+// it supports runtime registration.
+func (u *UsageTracker) RegisterBackend(name string, limit core.UsageLimits) {
+	if registrar, ok := u.backend.(interface{ RegisterBackend(string) }); ok {
+		registrar.RegisterBackend(name)
+	}
+	u.writeMu.Lock()
+	defer u.writeMu.Unlock()
+	src := *u.limits.Load()
+	cp := make(map[string]core.UsageLimits, len(src)+1)
+	maps.Copy(cp, src)
+	cp[name] = limit
+	u.limits.Store(&cp)
+}
+
 // -------------------------------------------------------------------------
 // BASELINE MANAGEMENT
 // -------------------------------------------------------------------------

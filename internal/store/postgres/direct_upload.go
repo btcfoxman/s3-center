@@ -150,6 +150,11 @@ func (s *Store) CommitUpload(ctx context.Context, id string, actual int64, etag 
 	if u.Status != core.UploadURLIssued && u.Status != core.UploadReserved && u.Status != core.UploadExpired {
 		return nil, core.ErrUploadSessionConflict
 	}
+	// Match normal-write lock ordering (quota group before backend quota) so
+	// account-shared capacity cannot race a direct-upload commit.
+	if _, err := tx.Exec(ctx, `SELECT name FROM quota_groups WHERE name=$1 FOR UPDATE`, u.QuotaGroup); err != nil {
+		return nil, fmt.Errorf("lock upload quota group: %w", err)
+	}
 	if actual != u.DeclaredBytes {
 		return nil, core.ErrUploadSizeMismatch
 	}

@@ -17,6 +17,7 @@ import (
 	"cmp"
 	"context"
 	"crypto/tls"
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -24,6 +25,7 @@ import (
 	"github.com/samber/do/v2"
 
 	"github.com/afreidah/s3-orchestrator/internal/backend"
+	"github.com/afreidah/s3-orchestrator/internal/backendmanage"
 	"github.com/afreidah/s3-orchestrator/internal/breaker"
 	objcache "github.com/afreidah/s3-orchestrator/internal/cache"
 	"github.com/afreidah/s3-orchestrator/internal/compression"
@@ -61,7 +63,8 @@ type BackendsResult struct {
 	// BackendCircuitBreaker is enabled. Empty when CBs are disabled.
 	// The watchdog registry consumes this so it never has to rediscover
 	// breakers via type assertion at runtime.
-	Breakers []breaker.StaleProbeResetter
+	Breakers    []breaker.StaleProbeResetter
+	Definitions []backendmanage.Definition
 }
 
 // ProvideBackends initializes all configured storage backends, wrapping
@@ -72,14 +75,44 @@ func ProvideBackends(i do.Injector) (*BackendsResult, error) {
 		return nil, err
 	}
 
-	backends := make(map[string]backend.ObjectBackend, len(cfg.Backends))
-	order := make([]string, 0, len(cfg.Backends))
-	limits := make(map[string]core.UsageLimits, len(cfg.Backends))
-	maxSizes := make(map[string]int64, len(cfg.Backends))
-	breakers := make([]breaker.StaleProbeResetter, 0, len(cfg.Backends))
-
+	definitions := make([]backendmanage.Definition, 0, len(cfg.Backends))
 	for idx := range cfg.Backends {
-		bcfg := &cfg.Backends[idx]
+		definitions = append(definitions, backendmanage.Definition{Version: 1, Backend: cfg.Backends[idx]})
+	}
+	if cfg.ManagedBackends.Enabled {
+		store, storeErr := do.Invoke[core.MetadataStore](i)
+		if storeErr != nil {
+			return nil, storeErr
+		}
+		managedStore, ok := store.(core.ManagedBackendStore)
+		if !ok {
+			return nil, fmt.Errorf("configured metadata store does not support managed backends")
+		}
+		managed, loadErr := backendmanage.Load(context.Background(), managedStore, cfg.ManagedBackends.MasterKey)
+		if loadErr != nil {
+			return nil, loadErr
+		}
+		definitions = append(definitions, managed...)
+		combined := make([]config.BackendConfig, 0, len(definitions))
+		for _, definition := range definitions {
+			combined = append(combined, definition.Backend)
+		}
+		if syncErr := store.SyncQuotaLimits(context.Background(), combined); syncErr != nil {
+			return nil, syncErr
+		}
+	}
+
+	backends := make(map[string]backend.ObjectBackend, len(definitions))
+	order := make([]string, 0, len(definitions))
+	limits := make(map[string]core.UsageLimits, len(definitions))
+	maxSizes := make(map[string]int64, len(definitions))
+	breakers := make([]breaker.StaleProbeResetter, 0, len(definitions))
+
+	for idx := range definitions {
+		bcfg := &definitions[idx].Backend
+		if _, exists := backends[bcfg.Name]; exists {
+			return nil, fmt.Errorf("duplicate backend name %q across static and managed definitions", bcfg.Name)
+		}
 		s3be, err := backend.NewS3Backend(context.Background(), bcfg)
 		if err != nil {
 			return nil, err
@@ -119,7 +152,34 @@ func ProvideBackends(i do.Injector) (*BackendsResult, error) {
 		UsageLimits:    limits,
 		MaxObjectSizes: maxSizes,
 		Breakers:       breakers,
+		Definitions:    definitions,
 	}, nil
+}
+
+// ProvideBackendManagement wires runtime R2 onboarding after the fleet and its
+// watchdog registry exist.
+func ProvideBackendManagement(i do.Injector) (*backendmanage.Manager, error) {
+	r := newResolver(i)
+	cfg := resolve[*config.Config](r)
+	store := resolve[core.MetadataStore](r)
+	runtime := resolve[*infra.BackendRuntime](r)
+	registry := resolve[*breaker.Registry](r)
+	backends := resolve[*BackendsResult](r)
+	if r.err != nil {
+		return nil, r.err
+	}
+	var managedStore backendmanage.Store
+	if cfg.ManagedBackends.Enabled {
+		var ok bool
+		managedStore, ok = store.(backendmanage.Store)
+		if !ok {
+			return nil, fmt.Errorf("configured metadata store does not support managed backends")
+		}
+	}
+	return backendmanage.New(backendmanage.ManagerDeps{
+		Config: cfg, Store: managedStore, Runtime: runtime, BreakerRegistry: registry,
+		Definitions: backends.Definitions,
+	})
 }
 
 // ProvideBreakerRegistry assembles the watchdog's breaker registry from the

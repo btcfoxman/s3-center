@@ -27,6 +27,9 @@ buckets:
 
 backends:
   - name: r2-primary
+    provider: cloudflare_r2
+    account_id: "${CF_ACCOUNT_ID}"
+    account_label: "Primary Cloudflare"
     endpoint: "https://${CF_ACCOUNT_ID}.r2.cloudflarestorage.com"
     region: auto
     bucket: "${R2_BUCKET}"
@@ -35,11 +38,12 @@ backends:
     force_path_style: true
     quota_bytes: 8000000000
     max_object_size: 268435456
-    quota_group: r2-account-main
+    quota_group: "cf-${CF_ACCOUNT_ID}"
     raw_limit_bytes: 10000000000
     static_buffer_bytes: 1000000000
     dynamic_buffer_bytes: 1000000000
     billing_policy: free_capped
+    warning_percent: 80
 
 routing_strategy: risk_aware_pack
 
@@ -76,6 +80,11 @@ direct_upload:
     - name: production
       token: "${DIRECT_UPLOAD_TOKEN}"
       scopes: ["uploads:write", "uploads:read"]
+
+managed_backends:
+  enabled: true
+  master_key: "${DYNAMIC_BACKEND_MASTER_KEY}"
+  default_warning_percent: 80
 
 cleanup_queue:
   concurrency: 4

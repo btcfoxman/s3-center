@@ -242,7 +242,11 @@ func (mc *Collector) updateUsageGauges(ctx context.Context, stats map[string]cor
 	}
 	// Reset all baselines first so period rollover (new month with no
 	// rows) zeroes out before the new period's values get cached.
-	mc.usage.ResetBaselines(mc.backendNames)
+	names := make([]string, 0, len(stats))
+	for name := range stats {
+		names = append(names, name)
+	}
+	mc.usage.ResetBaselines(names)
 	for name, u := range usage {
 		mc.usage.SetBaseline(name, u)
 	}

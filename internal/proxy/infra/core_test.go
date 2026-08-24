@@ -100,6 +100,25 @@ func TestCore_BackendForwarders(t *testing.T) {
 	}
 }
 
+func TestCore_AddBackendUpdatesLiveFleetAndLimits(t *testing.T) {
+	t.Parallel()
+	c := newTestCore(t)
+	limits := core.UsageLimits{APIRequestLimit: 7}
+	if err := c.AddBackend("runtime-r2", fakeBackend{}, 4096, limits); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.GetBackend("runtime-r2"); err != nil {
+		t.Fatal(err)
+	}
+	order := c.BackendOrder()
+	if order[len(order)-1] != "runtime-r2" || c.MaxObjectSize("runtime-r2") != 4096 {
+		t.Fatalf("runtime fleet was not updated: order=%v max=%d", order, c.MaxObjectSize("runtime-r2"))
+	}
+	if got := c.Usage().GetLimits()["runtime-r2"].APIRequestLimit; got != 7 {
+		t.Fatalf("runtime limit = %d, want 7", got)
+	}
+}
+
 func TestCore_DrainForwarders_NoCheckerThenWired(t *testing.T) {
 	t.Parallel()
 	c := newTestCore(t)

@@ -131,8 +131,12 @@ func (da *Aggregator) decorateLiveState(ctx context.Context, data *Data) {
 func (da *Aggregator) GetData(ctx context.Context) (*Data, error) {
 	limits := da.usage.GetLimits()
 
+	order := da.order
+	if da.fleet != nil {
+		order = da.fleet.BackendOrder()
+	}
 	data := &Data{
-		BackendOrder: da.order,
+		BackendOrder: order,
 		UsageLimits:  limits,
 		UsagePeriod:  counter.CurrentPeriod(),
 	}

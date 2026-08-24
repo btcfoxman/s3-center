@@ -106,8 +106,8 @@ type S3Backend struct {
 // sized for the proxy's concurrent workload (rebalancer, replicator, parallel
 // PUTs/GETs). IdleConnTimeout bounds DNS staleness: idle connections are
 // recycled within 90 s, forcing a fresh DNS resolution on the next dial.
-func newBackendTransport() *http.Transport {
-	return &http.Transport{
+func newBackendTransport(proxyURL string) *http.Transport {
+	transport := &http.Transport{
 		DialContext: (&net.Dialer{
 			Timeout:   10 * time.Second,
 			KeepAlive: 30 * time.Second,
@@ -120,6 +120,14 @@ func newBackendTransport() *http.Transport {
 		ResponseHeaderTimeout: 30 * time.Second,
 		ForceAttemptHTTP2:     true,
 	}
+	if proxyURL != "" {
+		// BackendConfig validation guarantees an absolute URL with a supported
+		// http(s)/socks5 scheme. ProxyURL preserves optional proxy credentials
+		// while keeping this transport isolated from every other account.
+		parsed, _ := url.Parse(proxyURL)
+		transport.Proxy = http.ProxyURL(parsed)
+	}
+	return transport
 }
 
 // NewS3Backend creates a new S3-compatible backend client. Uses BaseEndpoint
@@ -138,7 +146,7 @@ func NewS3Backend(ctx context.Context, cfg *config.BackendConfig) (*S3Backend, e
 		Credentials:  creds,
 		BaseEndpoint: aws.String(cfg.Endpoint),
 		UsePathStyle: cfg.ForcePathStyle,
-		HTTPClient:   &http.Client{Transport: newBackendTransport()},
+		HTTPClient:   &http.Client{Transport: newBackendTransport(cfg.ProxyURL)},
 	}
 	if cfg.DisableChecksum {
 		opts.RequestChecksumCalculation = aws.RequestChecksumCalculationWhenRequired
@@ -169,6 +177,17 @@ func NewS3Backend(ctx context.Context, cfg *config.BackendConfig) (*S3Backend, e
 		endpoint:        cfg.Endpoint,
 		unsignedPayload: unsignedPayload,
 	}, nil
+}
+
+// CheckBucket performs a real authenticated request against the configured
+// bucket. It is used by the managed-backend onboarding flow before a
+// definition is persisted or admitted into live routing.
+func (b *S3Backend) CheckBucket(ctx context.Context) error {
+	_, err := b.client.HeadBucket(ctx, &s3.HeadBucketInput{Bucket: aws.String(b.bucket)})
+	if err != nil {
+		return fmt.Errorf("check bucket access failed: %w", err)
+	}
+	return nil
 }
 
 // -------------------------------------------------------------------------

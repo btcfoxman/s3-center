@@ -122,6 +122,7 @@ Deeper details: [docs/architecture.md](docs/architecture.md).
 | First-run / demo | [Quickstart](docs/quickstart.md) |
 | S3 client setup | [User Guide](docs/user-guide.md) |
 | Production external-system setup | [S3 Center production integration](deploy/production/EXTERNAL-S3.md) |
+| Dynamic Cloudflare R2 onboarding | [Account proxy, quota cards, and alerts](deploy/production/R2-ACCOUNT-MANAGEMENT.md) |
 | Architecture | [docs/architecture.md](docs/architecture.md) |
 | Configuration walkthrough + hot-reload | [docs/configuration.md](docs/configuration.md) |
 | Authentication (SigV4, tokens, multi-bucket) | [docs/authentication.md](docs/authentication.md) |

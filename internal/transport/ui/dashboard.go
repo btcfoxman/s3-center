@@ -17,11 +17,14 @@ package ui
 import (
 	"bytes"
 	"net/http"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 
+	"github.com/afreidah/s3-orchestrator/internal/backendmanage"
 	"github.com/afreidah/s3-orchestrator/internal/observe/telemetry"
 	"github.com/afreidah/s3-orchestrator/internal/proxy/dashboard"
 	"github.com/afreidah/s3-orchestrator/internal/store/core"
@@ -30,15 +33,112 @@ import (
 
 // dashboardPage holds all data passed to the dashboard template.
 type dashboardPage struct {
-	Version          string
-	DBHealthy        bool
-	Data             *dashboard.Data
-	Buckets          []string
-	Config           configSummary
-	Integrity        integrityStats
-	TotalBytesUsed   int64
-	TotalBytesLimit  int64
-	TotalOrphanBytes int64
+	Version                string
+	DBHealthy              bool
+	Data                   *dashboard.Data
+	Buckets                []string
+	Config                 configSummary
+	Integrity              integrityStats
+	TotalBytesUsed         int64
+	TotalBytesLimit        int64
+	TotalOrphanBytes       int64
+	CloudflareAccounts     []cloudflareAccountUsage
+	ManagedBackendsEnabled bool
+}
+
+type cloudflareAccountUsage struct {
+	Label              string
+	AccountIDShort     string
+	QuotaGroup         string
+	Backends           []string
+	Buckets            []string
+	Proxy              string
+	UsedBytes          int64
+	OrphanBytes        int64
+	FreeTierBytes      int64
+	AdmissibleBytes    int64
+	FreeRemainingBytes int64
+	SafeRemainingBytes int64
+	ObservedRequests   int64
+	WarningPercent     int
+	StoragePercent     float64
+	State              string
+	Managed            bool
+}
+
+func cloudflareUsage(views []backendmanage.View, data *dashboard.Data) []cloudflareAccountUsage {
+	groups := make(map[string]*cloudflareAccountUsage)
+	for _, view := range views {
+		if view.Provider != "cloudflare_r2" && view.AccountID == "" {
+			continue
+		}
+		key := view.AccountID
+		if key == "" {
+			key = view.QuotaGroup
+		}
+		if key == "" {
+			key = view.Name
+		}
+		account := groups[key]
+		if account == nil {
+			label := view.AccountLabel
+			if label == "" {
+				label = view.Name
+			}
+			shortID := view.AccountID
+			if len(shortID) > 14 {
+				shortID = shortID[:6] + "…" + shortID[len(shortID)-6:]
+			}
+			account = &cloudflareAccountUsage{
+				Label: label, AccountIDShort: shortID, QuotaGroup: key, Proxy: view.Proxy,
+				FreeTierBytes: view.FreeTierBytes, AdmissibleBytes: view.AdmissibleBytes,
+				WarningPercent: view.WarningPercent, Managed: view.Managed,
+			}
+			groups[key] = account
+		} else if account.Proxy != view.Proxy {
+			account.Proxy = "混合出口"
+		}
+		account.Managed = account.Managed || view.Managed
+		account.Backends = append(account.Backends, view.Name)
+		account.Buckets = append(account.Buckets, view.Bucket)
+		stat := data.QuotaStats[view.Name]
+		account.UsedBytes += stat.BytesUsed + stat.OrphanBytes
+		account.OrphanBytes += stat.OrphanBytes
+		account.ObservedRequests += data.UsageStats[view.Name].APIRequests
+	}
+	result := make([]cloudflareAccountUsage, 0, len(groups))
+	for _, account := range groups {
+		sort.Strings(account.Backends)
+		sort.Strings(account.Buckets)
+		account.Buckets = slicesCompact(account.Buckets)
+		account.FreeRemainingBytes = max(0, account.FreeTierBytes-account.UsedBytes)
+		account.SafeRemainingBytes = max(0, account.AdmissibleBytes-account.UsedBytes)
+		if account.FreeTierBytes > 0 {
+			account.StoragePercent = float64(account.UsedBytes) / float64(account.FreeTierBytes) * 100
+		}
+		account.State = "healthy"
+		if account.FreeTierBytes > 0 && account.UsedBytes >= account.FreeTierBytes {
+			account.State = "critical"
+		} else if account.WarningPercent > 0 && account.StoragePercent >= float64(account.WarningPercent) {
+			account.State = "warning"
+		}
+		result = append(result, *account)
+	}
+	sort.Slice(result, func(i, j int) bool { return strings.Compare(result[i].Label, result[j].Label) < 0 })
+	return result
+}
+
+func slicesCompact(values []string) []string {
+	if len(values) < 2 {
+		return values
+	}
+	out := values[:1]
+	for _, value := range values[1:] {
+		if value != out[len(out)-1] {
+			out = append(out, value)
+		}
+	}
+	return out
 }
 
 // counterVecTotal sums the current value of every label combination on
@@ -134,13 +234,14 @@ func (h *Handler) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	}
 
 	page := dashboardPage{
-		Version:          telemetry.Version,
-		DBHealthy:        h.dbHealthy(),
-		Data:             data,
-		Buckets:          bucketNames,
-		TotalBytesUsed:   totalUsed,
-		TotalBytesLimit:  totalLimit,
-		TotalOrphanBytes: totalOrphan,
+		Version:                telemetry.Version,
+		DBHealthy:              h.dbHealthy(),
+		Data:                   data,
+		Buckets:                bucketNames,
+		TotalBytesUsed:         totalUsed,
+		TotalBytesLimit:        totalLimit,
+		TotalOrphanBytes:       totalOrphan,
+		ManagedBackendsEnabled: h.backendManagement != nil && h.backendManagement.Enabled(),
 		Config: configSummary{
 			RoutingStrategy:           string(cfg.RoutingStrategy),
 			ReplicationFactor:         cfg.Replication.Factor,
@@ -157,6 +258,9 @@ func (h *Handler) handleDashboard(w http.ResponseWriter, r *http.Request) {
 			ChecksTotal: counterVecTotal(telemetry.IntegrityChecksTotal),
 			ErrorsTotal: counterVecTotal(telemetry.IntegrityErrorsTotal),
 		},
+	}
+	if h.backendManagement != nil {
+		page.CloudflareAccounts = cloudflareUsage(h.backendManagement.List(), data)
 	}
 
 	var buf bytes.Buffer

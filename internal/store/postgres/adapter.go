@@ -317,6 +317,9 @@ func (a *pgTxAdapter) DeleteCleanupItem(ctx context.Context, id int64) error {
 // core.ErrNoSpaceAvailable when the quota row reports zero rows updated
 // (insufficient quota).
 func (a *pgTxAdapter) IncrementBackendQuota(ctx context.Context, backendName string, delta int64) error {
+	if _, err := a.q.LockQuotaGroupForBackend(ctx, backendName); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return fmt.Errorf("lock quota group for %s: %w", backendName, err)
+	}
 	n, err := a.q.IncrementQuota(ctx, db.IncrementQuotaParams{
 		Amount:      delta,
 		BackendName: backendName,

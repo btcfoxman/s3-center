@@ -43,6 +43,7 @@ import (
 	"github.com/afreidah/s3-orchestrator/internal/counter"
 	"github.com/afreidah/s3-orchestrator/internal/proxy/accounting"
 	"github.com/afreidah/s3-orchestrator/internal/proxy/metrics"
+	"github.com/afreidah/s3-orchestrator/internal/store/core"
 )
 
 // DrainChecker reports whether a named backend is currently being drained.
@@ -171,6 +172,16 @@ func (c *BackendRuntime) Backends() map[string]backend.ObjectBackend {
 // BackendOrder returns the configured backend ordering (worker.Ops contract).
 func (c *BackendRuntime) BackendOrder() []string {
 	return c.registry.Order()
+}
+
+// AddBackend admits one already-validated backend into the live fleet and its
+// quota policy without restarting the process.
+func (c *BackendRuntime) AddBackend(name string, be backend.ObjectBackend, maxObjectSize int64, limits core.UsageLimits) error {
+	if err := c.registry.Add(name, be); err != nil {
+		return err
+	}
+	c.usage.RegisterBackend(name, maxObjectSize, limits)
+	return nil
 }
 
 // IsDraining returns true if the named backend is currently being drained.

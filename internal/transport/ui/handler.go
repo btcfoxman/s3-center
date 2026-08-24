@@ -36,6 +36,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/afreidah/s3-orchestrator/internal/backendmanage"
 	"github.com/afreidah/s3-orchestrator/internal/config"
 	"github.com/afreidah/s3-orchestrator/internal/observe/logfmt"
 	"github.com/afreidah/s3-orchestrator/internal/observe/telemetry"
@@ -80,43 +81,45 @@ type DashboardOps interface {
 
 // Deps holds the dependencies New requires.
 type Deps struct {
-	Dashboard     DashboardOps
-	Sync          BackendSyncer
-	Objects       *ops.Objects
-	Integrity     *ops.Integrity
-	Replication   *ops.Replication
-	Rebalance     *ops.Rebalance
-	Encryption    *ops.Encryption
-	Compression   *ops.Compression
-	DBHealthy     func() bool
-	Cfg           *config.Config
-	LogBuffer     *telemetry.LogBuffer
-	LoginThrottle *httputil.LoginThrottle
+	Dashboard         DashboardOps
+	Sync              BackendSyncer
+	Objects           *ops.Objects
+	Integrity         *ops.Integrity
+	Replication       *ops.Replication
+	Rebalance         *ops.Rebalance
+	Encryption        *ops.Encryption
+	Compression       *ops.Compression
+	DBHealthy         func() bool
+	Cfg               *config.Config
+	LogBuffer         *telemetry.LogBuffer
+	LoginThrottle     *httputil.LoginThrottle
+	BackendManagement *backendmanage.Manager
 }
 
 // Handler serves the web UI dashboard.
 type Handler struct {
-	log            *slog.Logger
-	dashboardOps   DashboardOps
-	syncOps        BackendSyncer
-	objects        *ops.Objects
-	integrity      *ops.Integrity
-	replication    *ops.Replication
-	rebalance      *ops.Rebalance
-	encryption     *ops.Encryption
-	compression    *ops.Compression
-	dbHealthy      func() bool
-	cfg            syncutil.AtomicConfig[config.Config]
-	templates      *template.Template
-	logBuffer      *telemetry.LogBuffer
-	loginThrottle  *httputil.LoginThrottle
-	prefix         string
-	adminKey       string
-	adminSecret    string
-	sessionKey     []byte
-	forceSecure    bool
-	trustedProxies []*net.IPNet
-	asyncOps       asyncOpTracker
+	log               *slog.Logger
+	dashboardOps      DashboardOps
+	syncOps           BackendSyncer
+	objects           *ops.Objects
+	integrity         *ops.Integrity
+	replication       *ops.Replication
+	rebalance         *ops.Rebalance
+	encryption        *ops.Encryption
+	compression       *ops.Compression
+	dbHealthy         func() bool
+	cfg               syncutil.AtomicConfig[config.Config]
+	templates         *template.Template
+	logBuffer         *telemetry.LogBuffer
+	loginThrottle     *httputil.LoginThrottle
+	backendManagement *backendmanage.Manager
+	prefix            string
+	adminKey          string
+	adminSecret       string
+	sessionKey        []byte
+	forceSecure       bool
+	trustedProxies    []*net.IPNet
+	asyncOps          asyncOpTracker
 }
 
 // New is the explicit-deps constructor. The DI layer constructs Deps and
@@ -132,24 +135,25 @@ func New(d *Deps) *Handler {
 	must.NotNil("d.Compression", d.Compression)
 	must.NotNil("d.Cfg", d.Cfg)
 	h := &Handler{
-		log:            slog.Default().With(logfmt.Component("ui")),
-		dashboardOps:   d.Dashboard,
-		syncOps:        d.Sync,
-		objects:        d.Objects,
-		integrity:      d.Integrity,
-		replication:    d.Replication,
-		rebalance:      d.Rebalance,
-		encryption:     d.Encryption,
-		compression:    d.Compression,
-		dbHealthy:      d.DBHealthy,
-		templates:      loadTemplates(),
-		logBuffer:      d.LogBuffer,
-		loginThrottle:  d.LoginThrottle,
-		adminKey:       d.Cfg.UI.AdminKey,
-		adminSecret:    d.Cfg.UI.AdminSecret,
-		sessionKey:     deriveSessionKey(&d.Cfg.UI),
-		forceSecure:    d.Cfg.UI.ForceSecureCookies,
-		trustedProxies: httputil.ParseTrustedProxies(d.Cfg.RateLimit.TrustedProxies),
+		log:               slog.Default().With(logfmt.Component("ui")),
+		dashboardOps:      d.Dashboard,
+		syncOps:           d.Sync,
+		objects:           d.Objects,
+		integrity:         d.Integrity,
+		replication:       d.Replication,
+		rebalance:         d.Rebalance,
+		encryption:        d.Encryption,
+		compression:       d.Compression,
+		dbHealthy:         d.DBHealthy,
+		templates:         loadTemplates(),
+		logBuffer:         d.LogBuffer,
+		loginThrottle:     d.LoginThrottle,
+		backendManagement: d.BackendManagement,
+		adminKey:          d.Cfg.UI.AdminKey,
+		adminSecret:       d.Cfg.UI.AdminSecret,
+		sessionKey:        deriveSessionKey(&d.Cfg.UI),
+		forceSecure:       d.Cfg.UI.ForceSecureCookies,
+		trustedProxies:    httputil.ParseTrustedProxies(d.Cfg.RateLimit.TrustedProxies),
 	}
 	h.cfg.Store(d.Cfg)
 	return h
@@ -190,6 +194,9 @@ func (h *Handler) validBucketPrefix(key string) bool {
 
 // validBackend checks whether the backend name exists in config.
 func (h *Handler) validBackend(name string) bool {
+	if h.backendManagement != nil && h.backendManagement.HasBackend(name) {
+		return true
+	}
 	cfg := h.cfg.Load()
 	for i := range cfg.Backends {
 		if cfg.Backends[i].Name == name {

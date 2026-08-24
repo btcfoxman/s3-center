@@ -77,6 +77,7 @@ type Config struct {
 	Notifications         NotificationConfig          `yaml:"notifications"`
 	Debug                 DebugConfig                 `yaml:"debug"`
 	DirectUpload          DirectUploadConfig          `yaml:"direct_upload"`
+	ManagedBackends       ManagedBackendsConfig       `yaml:"managed_backends"`
 	RoutingStrategy       RoutingStrategy             `yaml:"routing_strategy"` // "pack" (default) or "spread"
 }
 
@@ -146,6 +147,7 @@ func (c *Config) validatePerTypeSections() []error {
 	errs = append(errs, c.Notifications.setDefaultsAndValidate()...)
 	errs = append(errs, c.Debug.FlightRecorder.setDefaultsAndValidate()...)
 	errs = append(errs, c.DirectUpload.setDefaultsAndValidate()...)
+	errs = append(errs, c.ManagedBackends.setDefaultsAndValidate()...)
 	if c.Redis != nil {
 		errs = append(errs, c.Redis.setDefaultsAndValidate()...)
 	}
@@ -278,6 +280,9 @@ func topLevelFieldsChanged(old, new *Config) []string {
 	if old.UI != new.UI {
 		changed = append(changed, "ui")
 	}
+	if old.ManagedBackends != new.ManagedBackends {
+		changed = append(changed, "managed_backends")
+	}
 	if circuitBreakerChanged(old.CircuitBreaker, new.CircuitBreaker) {
 		changed = append(changed, "circuit_breaker")
 	}
@@ -346,12 +351,13 @@ func backendStructuralChanges(old, new []BackendConfig) []string {
 	var changed []string
 	for i := range old {
 		o, n := old[i], new[i]
-		if o.Name != n.Name || o.Endpoint != n.Endpoint || o.Region != n.Region ||
+		if o.Name != n.Name || o.Provider != n.Provider || o.AccountID != n.AccountID ||
+			o.AccountLabel != n.AccountLabel || o.Endpoint != n.Endpoint || o.Region != n.Region ||
 			o.Bucket != n.Bucket || o.AccessKeyID != n.AccessKeyID ||
 			o.SecretAccessKey != n.SecretAccessKey || o.ForcePathStyle != n.ForcePathStyle ||
 			boolDefault(o.UnsignedPayload, true) != boolDefault(n.UnsignedPayload, true) ||
 			o.DisableChecksum != n.DisableChecksum ||
-			o.StripSDKHeaders != n.StripSDKHeaders {
+			o.StripSDKHeaders != n.StripSDKHeaders || o.ProxyURL != n.ProxyURL {
 			changed = append(changed, fmt.Sprintf("backends[%d] (%s) structural fields", i, o.Name))
 		}
 	}

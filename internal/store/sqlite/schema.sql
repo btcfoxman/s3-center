@@ -241,4 +241,12 @@ CREATE TABLE IF NOT EXISTS capacity_reservations (
 CREATE INDEX IF NOT EXISTS idx_upload_sessions_status_expiry ON upload_sessions(status, expires_at);
 CREATE INDEX IF NOT EXISTS idx_upload_sessions_created ON upload_sessions(created_at DESC);
 
-INSERT INTO schema_version (version) VALUES (8);
+-- Encrypted runtime backend definitions created through the admin UI.
+CREATE TABLE IF NOT EXISTS managed_backends (
+    name TEXT PRIMARY KEY,
+    encrypted_config BLOB NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+INSERT INTO schema_version (version) VALUES (9);

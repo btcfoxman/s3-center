@@ -14,7 +14,9 @@ package config
 
 import (
 	"cmp"
+	"errors"
 	"fmt"
+	"net/url"
 )
 
 // CredentialSourceStatic and friends enumerate the supported credential_source values.
@@ -28,6 +30,9 @@ const (
 // BackendConfig holds configuration for an S3-compatible storage backend.
 type BackendConfig struct {
 	Name            string `yaml:"name"`              // Identifier for metrics/tracing
+	Provider        string `yaml:"provider"`          // Provider family, e.g. cloudflare_r2
+	AccountID       string `yaml:"account_id"`        // Provider account identifier (non-secret)
+	AccountLabel    string `yaml:"account_label"`     // Human-readable account label
 	Endpoint        string `yaml:"endpoint"`          // S3-compatible endpoint URL
 	Region          string `yaml:"region"`            // AWS region or equivalent
 	Bucket          string `yaml:"bucket"`            // Target bucket name
@@ -49,6 +54,14 @@ type BackendConfig struct {
 	StaticBufferBytes  int64  `yaml:"static_buffer_bytes"`  // Fixed safety reserve kept unavailable
 	DynamicBufferBytes int64  `yaml:"dynamic_buffer_bytes"` // Drift/traffic reserve kept unavailable
 	BillingPolicy      string `yaml:"billing_policy"`       // free_capped or metered
+	ProxyURL           string `yaml:"proxy_url"`            // Optional account-scoped HTTP(S)/SOCKS5 egress proxy
+	WarningPercent     int    `yaml:"warning_percent"`      // Capacity alert threshold (50-100, default 80)
+}
+
+// NormalizeAndValidateBackend applies the same defaults and validation used for
+// YAML entries to one runtime-created backend definition.
+func NormalizeAndValidateBackend(b *BackendConfig) error {
+	return errors.Join(validateBackend(0, b, make(map[string]bool))...)
 }
 
 // validateBackends checks every BackendConfig in the configured list,
@@ -82,6 +95,7 @@ func validateBackend(idx int, b *BackendConfig, seenNames map[string]bool) []err
 	b.CredentialSource = cmp.Or(b.CredentialSource, CredentialSourceStatic)
 	b.QuotaGroup = cmp.Or(b.QuotaGroup, b.Name)
 	b.BillingPolicy = cmp.Or(b.BillingPolicy, "free_capped")
+	b.WarningPercent = cmp.Or(b.WarningPercent, 80)
 
 	var errs []error
 	if seenNames[b.Name] {
@@ -92,6 +106,17 @@ func validateBackend(idx int, b *BackendConfig, seenNames map[string]bool) []err
 	errs = append(errs, requiredBackendStringErrs(prefix, b)...)
 	errs = append(errs, credentialSourceErrs(prefix, b)...)
 	errs = append(errs, nonNegativeBackendFieldErrs(prefix, b)...)
+	if b.WarningPercent < 50 || b.WarningPercent > 100 {
+		errs = append(errs, prefixed(prefix, fmt.Errorf("warning_percent must be between 50 and 100")))
+	}
+	if b.ProxyURL != "" {
+		proxy, err := url.Parse(b.ProxyURL)
+		if err != nil || proxy.Host == "" {
+			errs = append(errs, prefixed(prefix, fmt.Errorf("proxy_url must be an absolute proxy URL")))
+		} else if proxy.Scheme != "http" && proxy.Scheme != "https" && proxy.Scheme != "socks5" && proxy.Scheme != "socks5h" {
+			errs = append(errs, prefixed(prefix, fmt.Errorf("proxy_url scheme must be http, https, socks5, or socks5h")))
+		}
+	}
 	return errs
 }
 

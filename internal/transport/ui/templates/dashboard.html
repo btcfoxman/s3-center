@@ -78,11 +78,63 @@
     {{end}}
   </section>
 
+  <!-- Cloudflare Accounts -->
+  <section class="accounts-section">
+    <div class="section-heading section-heading-actions">
+      <div>
+        <span class="section-index">02 · CLOUDFLARE ACCOUNTS</span>
+        <h2>Cloudflare 账号额度</h2>
+        <p>按 Account 聚合所有 R2 Bucket；免费存储是 GB-month 口径，卡片水位为当前对象占用</p>
+      </div>
+      {{if .ManagedBackendsEnabled}}
+      <button id="account-add-btn" class="btn-upload"><span>接入 R2 账号</span><b aria-hidden="true">＋</b></button>
+      {{end}}
+    </div>
+    <div class="cf-account-grid">
+      {{range .CloudflareAccounts}}
+      <article class="cf-account-card state-{{.State}}">
+        <div class="cf-account-head">
+          <div>
+            <span class="cf-provider">CF / R2</span>
+            <h3>{{.Label}}</h3>
+            <code>{{.AccountIDShort}}</code>
+          </div>
+          <span class="cf-state">
+            {{if eq .State "critical"}}已超免费线{{else if eq .State "warning"}}额度预警{{else}}水位正常{{end}}
+          </span>
+        </div>
+        <div class="cf-capacity-readout">
+          <strong>{{formatBytes .UsedBytes}}</strong>
+          <span>/ {{formatBytes .FreeTierBytes}} FREE</span>
+          <b>{{printf "%.1f" .StoragePercent}}%</b>
+        </div>
+        <div class="cf-meter" aria-label="当前存储免费额度使用率">
+          <i style="width:{{.StoragePercent}}%"></i>
+          <em style="left:{{.WarningPercent}}%" title="{{.WarningPercent}}% 预警线"></em>
+        </div>
+        <div class="cf-account-metrics">
+          <div><span>免费剩余</span><strong>{{formatBytes .FreeRemainingBytes}}</strong></div>
+          <div><span>安全可写</span><strong>{{formatBytes .SafeRemainingBytes}}</strong></div>
+          <div><span>本月系统观测请求</span><strong>{{formatNumber .ObservedRequests}}</strong></div>
+        </div>
+        <div class="cf-account-foot">
+          <span>{{.Proxy}}</span>
+          <span>{{len .Backends}} backend · {{range $i, $b := .Buckets}}{{if $i}}, {{end}}{{$b}}{{end}}</span>
+          {{if .Managed}}<span class="cf-managed">动态托管</span>{{end}}
+        </div>
+      </article>
+      {{else}}
+      <div class="cf-account-empty">尚未识别到 Cloudflare R2 账号。可接入已授权的 R2 Bucket，系统会先验证再加入调度。</div>
+      {{end}}
+    </div>
+    <p class="cf-account-note">请求数仅统计经过 S3 Center 的操作；Cloudflare 控制台、其他客户端和浏览器直传不会包含在此数值中。Class A 免费 100 万次/月、Class B 免费 1000 万次/月应以 Cloudflare Billing 为最终依据。</p>
+  </section>
+
   <!-- Backends -->
   <section class="backends-section">
     <div class="section-heading section-heading-actions">
       <div>
-        <span class="section-index">02 · STORAGE FLEET</span>
+        <span class="section-index">03 · STORAGE FLEET</span>
         <h2>存储后端</h2>
         <p>查看后端水位，并执行编排与维护操作</p>
       </div>
@@ -211,7 +263,7 @@
   <section class="usage-section">
     <div class="section-heading">
       <div>
-        <span class="section-index">03 · TRAFFIC METER</span>
+        <span class="section-index">04 · TRAFFIC METER</span>
         <h2>本月用量</h2>
         <p>{{.Data.UsagePeriod}} · API 请求与数据流量</p>
       </div>
@@ -262,7 +314,7 @@
   <section class="objects-section">
     <div class="section-heading section-heading-actions">
       <div>
-        <span class="section-index">04 · OBJECT BROWSER</span>
+        <span class="section-index">05 · OBJECT BROWSER</span>
         <h2>对象浏览器</h2>
         <p>浏览、上传与维护虚拟存储桶中的对象</p>
       </div>
@@ -305,7 +357,7 @@
   <section class="configuration-section">
     <div class="section-heading">
       <div>
-        <span class="section-index">05 · RUNTIME PROFILE</span>
+        <span class="section-index">06 · RUNTIME PROFILE</span>
         <h2>运行配置</h2>
         <p>当前生效的路由、冗余与数据保护策略</p>
       </div>
@@ -374,7 +426,7 @@
   <section class="logs-section">
     <div class="section-heading section-heading-actions">
       <div>
-        <span class="section-index">06 · EVENT STREAM</span>
+        <span class="section-index">07 · EVENT STREAM</span>
         <h2>运行日志</h2>
         <p>筛选并检查最近的控制平面事件</p>
       </div>
@@ -404,6 +456,40 @@
     <button id="confirm-delete-cancel">Cancel</button>
     <button id="confirm-delete-ok" class="btn-danger">Delete</button>
   </div>
+</dialog>
+
+<dialog id="account-dialog" class="account-dialog">
+  <form id="account-form" autocomplete="off">
+    <div class="dialog-heading">
+      <span class="section-index">SECURE ONBOARDING</span>
+      <h2>接入 Cloudflare R2</h2>
+      <p>凭据和代理认证信息会先加密再写入数据库。验证成功后立即加入调度，无需重启。</p>
+    </div>
+    <div class="account-form-grid">
+      <label>Backend 名称<input name="name" type="text" maxlength="63" placeholder="r2-account-02" required></label>
+      <label>账号备注<input name="account_label" type="text" maxlength="80" placeholder="团队备用账号"></label>
+      <label class="span-2">Cloudflare Account ID<input name="account_id" type="text" minlength="32" maxlength="32" spellcheck="false" placeholder="32 位 Account ID" required></label>
+      <label>Jurisdiction
+        <select name="jurisdiction">
+          <option value="default">Default / Global</option>
+          <option value="eu">European Union</option>
+          <option value="us">United States</option>
+          <option value="fedramp">FedRAMP</option>
+        </select>
+      </label>
+      <label>R2 Bucket<input name="bucket" type="text" maxlength="63" placeholder="media-assets" required></label>
+      <label class="span-2">R2 Access Key ID<input name="access_key_id" type="password" spellcheck="false" required></label>
+      <label class="span-2">R2 Secret Access Key<input name="secret_access_key" type="password" spellcheck="false" required></label>
+      <label class="span-2">出口代理（可选）<input name="proxy_url" type="text" spellcheck="false" placeholder="http://user:pass@203.0.113.10:8080 或 socks5://..."><small>未写协议时按 HTTP；代理只作用于该账号的服务端 R2 请求。</small></label>
+      <label class="span-2 range-label">免费额度预警线 <output id="warning-output">80%</output><input name="warning_percent" id="warning-percent" type="range" min="50" max="95" value="80"></label>
+    </div>
+    <div class="account-security-note"><b>接入前准备</b><span>请在 Cloudflare R2 创建仅限目标 Bucket 的 Object Read &amp; Write Token。这里需要的是 R2 Access Key ID / Secret，不是普通 Cloudflare API Token。</span></div>
+    <p id="account-add-status" class="account-add-status" role="status"></p>
+    <div class="dialog-actions">
+      <button id="account-cancel" type="button">取消</button>
+      <button id="account-submit" type="submit" class="btn-primary">验证并接入</button>
+    </div>
+  </form>
 </dialog>
 
 <dialog id="upload-dialog">
@@ -449,5 +535,6 @@
 
 <script src="static/tree.js?v={{.Version}}"></script>
 <script src="static/logs.js?v={{.Version}}"></script>
+<script src="static/accounts.js?v={{.Version}}"></script>
 </body>
 </html>

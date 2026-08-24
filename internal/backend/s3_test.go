@@ -13,12 +13,26 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 
 	"github.com/afreidah/s3-orchestrator/internal/config"
 )
+
+func TestNewBackendTransportUsesAccountProxy(t *testing.T) {
+	t.Parallel()
+	transport := newBackendTransport("socks5://user:secret@203.0.113.4:1080")
+	requestURL, _ := url.Parse("https://example.r2.cloudflarestorage.com")
+	proxyURL, err := transport.Proxy(&http.Request{URL: requestURL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if proxyURL == nil || proxyURL.Scheme != "socks5" || proxyURL.Host != "203.0.113.4:1080" {
+		t.Fatalf("proxy URL = %v", proxyURL)
+	}
+}
 
 // nonSeekableReader wraps a reader so it cannot be type-asserted to
 // io.ReadSeeker, forcing PutObject's signed-payload materialization path.

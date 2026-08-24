@@ -29,14 +29,39 @@ type Manager struct {
 	cfg      config.DirectUploadConfig
 	store    core.DirectUploadStore
 	metadata core.MetadataStore
-	backends map[string]backend.ObjectBackend
-	order    []string
+	fleet    Fleet
 	buckets  map[string]struct{}
 	log      *slog.Logger
 }
 
+// Fleet is the live backend registry surface direct uploads need.
+type Fleet interface {
+	GetBackend(name string) (backend.ObjectBackend, error)
+	BackendOrder() []string
+}
+
+type staticFleet struct {
+	backends map[string]backend.ObjectBackend
+	order    []string
+}
+
+func (f staticFleet) GetBackend(name string) (backend.ObjectBackend, error) {
+	be, ok := f.backends[name]
+	if !ok {
+		return nil, fmt.Errorf("backend %s not found", name)
+	}
+	return be, nil
+}
+func (f staticFleet) BackendOrder() []string { return append([]string(nil), f.order...) }
+
 //nolint:gocritic // The manager owns an immutable configuration snapshot.
 func New(cfg config.DirectUploadConfig, store core.MetadataStore, backends map[string]backend.ObjectBackend, order []string, buckets []config.BucketConfig) (*Manager, error) {
+	return NewWithFleet(cfg, store, staticFleet{backends: backends, order: order}, buckets)
+}
+
+// NewWithFleet binds the manager to a runtime registry so newly managed
+// backends immediately become direct-upload candidates.
+func NewWithFleet(cfg config.DirectUploadConfig, store core.MetadataStore, fleet Fleet, buckets []config.BucketConfig) (*Manager, error) {
 	direct, ok := store.(core.DirectUploadStore)
 	if !ok {
 		return nil, fmt.Errorf("configured store does not support direct uploads")
@@ -45,7 +70,7 @@ func New(cfg config.DirectUploadConfig, store core.MetadataStore, backends map[s
 	for _, b := range buckets {
 		allowed[b.Name] = struct{}{}
 	}
-	return &Manager{cfg: cfg, store: direct, metadata: store, backends: backends, order: order, buckets: allowed, log: slog.Default().With("component", "direct_upload")}, nil
+	return &Manager{cfg: cfg, store: direct, metadata: store, fleet: fleet, buckets: allowed, log: slog.Default().With("component", "direct_upload")}, nil
 }
 
 func newID() (string, error) {
@@ -77,7 +102,7 @@ func (m *Manager) Create(ctx context.Context, r CreateRequest) (*CreateResult, e
 	}
 	logical := r.Bucket + "/" + r.Key
 	physical := "__objects/" + id
-	session, err := m.store.ReserveUpload(ctx, &core.ReserveUploadParams{ID: id, IdempotencyKey: r.IdempotencyKey, LogicalKey: logical, PhysicalKey: physical, DeclaredBytes: r.Size, ContentType: r.ContentType, ExpiresAt: time.Now().UTC().Add(m.cfg.SessionTTL), Candidates: m.order})
+	session, err := m.store.ReserveUpload(ctx, &core.ReserveUploadParams{ID: id, IdempotencyKey: r.IdempotencyKey, LogicalKey: logical, PhysicalKey: physical, DeclaredBytes: r.Size, ContentType: r.ContentType, ExpiresAt: time.Now().UTC().Add(m.cfg.SessionTTL), Candidates: m.fleet.BackendOrder()})
 	if err != nil {
 		return nil, err
 	}
@@ -88,8 +113,8 @@ func (m *Manager) Create(ctx context.Context, r CreateRequest) (*CreateResult, e
 	if time.Now().UTC().After(session.ExpiresAt) {
 		return nil, core.ErrUploadSessionExpired
 	}
-	be, ok := m.backends[session.BackendName]
-	if !ok {
+	be, err := m.fleet.GetBackend(session.BackendName)
+	if err != nil {
 		if created {
 			_ = m.store.AbortUpload(ctx, session.ID, "selected backend is unavailable", false)
 		}
@@ -137,8 +162,8 @@ func (m *Manager) Complete(ctx context.Context, id string) (*core.UploadSession,
 }
 
 func (m *Manager) completeVerified(ctx context.Context, u *core.UploadSession) (*core.UploadSession, error) {
-	be, ok := m.backends[u.BackendName]
-	if !ok {
+	be, lookupErr := m.fleet.GetBackend(u.BackendName)
+	if lookupErr != nil {
 		return nil, fmt.Errorf("backend %s unavailable", u.BackendName)
 	}
 	head, err := be.HeadObject(ctx, u.PhysicalKey)
@@ -181,11 +206,11 @@ func (m *Manager) Abort(ctx context.Context, id string) error {
 }
 
 func (m *Manager) deleteOrEnqueue(ctx context.Context, backendName, key, reason string, size int64) {
-	be, ok := m.backends[backendName]
-	if !ok {
+	be, err := m.fleet.GetBackend(backendName)
+	if err != nil {
 		return
 	}
-	err := be.DeleteObject(ctx, key)
+	err = be.DeleteObject(ctx, key)
 	if err == nil || backend.IsNotFound(err) {
 		return
 	}
@@ -201,8 +226,8 @@ func (m *Manager) Reap(ctx context.Context) error {
 	}
 	for i := range sessions {
 		u := &sessions[i]
-		be, ok := m.backends[u.BackendName]
-		if !ok {
+		be, lookupErr := m.fleet.GetBackend(u.BackendName)
+		if lookupErr != nil {
 			continue
 		}
 		head, e := be.HeadObject(ctx, u.PhysicalKey)

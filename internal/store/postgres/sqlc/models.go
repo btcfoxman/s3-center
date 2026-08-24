@@ -69,6 +69,13 @@ type CleanupQueue struct {
 	ClaimedBy   *string
 }
 
+type ManagedBackend struct {
+	Name            string
+	EncryptedConfig []byte
+	CreatedAt       pgtype.Timestamptz
+	UpdatedAt       pgtype.Timestamptz
+}
+
 type MultipartPart struct {
 	UploadID      string
 	PartNumber    int32

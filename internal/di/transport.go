@@ -21,6 +21,7 @@ import (
 
 	"github.com/samber/do/v2"
 
+	"github.com/afreidah/s3-orchestrator/internal/backendmanage"
 	"github.com/afreidah/s3-orchestrator/internal/breaker"
 	"github.com/afreidah/s3-orchestrator/internal/compression"
 	"github.com/afreidah/s3-orchestrator/internal/config"
@@ -34,6 +35,7 @@ import (
 	"github.com/afreidah/s3-orchestrator/internal/proxy"
 	"github.com/afreidah/s3-orchestrator/internal/proxy/dashboard"
 	"github.com/afreidah/s3-orchestrator/internal/proxy/drain"
+	"github.com/afreidah/s3-orchestrator/internal/proxy/infra"
 	"github.com/afreidah/s3-orchestrator/internal/proxy/metrics"
 	"github.com/afreidah/s3-orchestrator/internal/proxy/multipart"
 	"github.com/afreidah/s3-orchestrator/internal/proxy/object"
@@ -54,11 +56,11 @@ func ProvideDirectUploadManager(i do.Injector) (*directupload.Manager, error) {
 	r := newResolver(i)
 	cfg := resolve[*config.Config](r)
 	stores := resolve[core.MetadataStore](r)
-	br := resolve[*BackendsResult](r)
+	runtime := resolve[*infra.BackendRuntime](r)
 	if r.err != nil {
 		return nil, r.err
 	}
-	return directupload.New(cfg.DirectUpload, stores, br.Backends, br.Order, cfg.Buckets)
+	return directupload.NewWithFleet(cfg.DirectUpload, stores, runtime, cfg.Buckets)
 }
 
 func ProvideDirectUploadHandler(i do.Injector) (*directapi.Handler, error) {
@@ -169,23 +171,25 @@ func ProvideUIHandler(i do.Injector) (*ui.Handler, error) {
 	aggregator := resolve[*dashboard.Aggregator](r)
 	reconciler := resolve[*reconcile.Manager](r)
 	opsSvc := resolve[*ops.Services](r)
+	backendManagement := resolve[*backendmanage.Manager](r)
 	if r.err != nil {
 		return nil, r.err
 	}
 
 	return ui.New(&ui.Deps{
-		Dashboard:     aggregator,
-		Sync:          reconciler,
-		Objects:       opsSvc.Objects,
-		Integrity:     opsSvc.Integrity,
-		Replication:   opsSvc.Replication,
-		Rebalance:     opsSvc.Rebalance,
-		Encryption:    opsSvc.Encryption,
-		Compression:   opsSvc.Compression,
-		DBHealthy:     cb.IsHealthy,
-		Cfg:           cfg,
-		LogBuffer:     logBuffer,
-		LoginThrottle: loginThrottle,
+		Dashboard:         aggregator,
+		Sync:              reconciler,
+		Objects:           opsSvc.Objects,
+		Integrity:         opsSvc.Integrity,
+		Replication:       opsSvc.Replication,
+		Rebalance:         opsSvc.Rebalance,
+		Encryption:        opsSvc.Encryption,
+		Compression:       opsSvc.Compression,
+		DBHealthy:         cb.IsHealthy,
+		Cfg:               cfg,
+		LogBuffer:         logBuffer,
+		LoginThrottle:     loginThrottle,
+		BackendManagement: backendManagement,
 	}), nil
 }
 

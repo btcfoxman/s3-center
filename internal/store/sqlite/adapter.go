@@ -451,8 +451,22 @@ func (a *sqliteTxAdapter) IncrementBackendQuota(ctx context.Context, backendName
 		UPDATE backend_quotas
 		SET bytes_used = bytes_used + ?, updated_at = ?
 		WHERE backend_name = ?
-		  AND (bytes_limit = 0 OR bytes_used + orphan_bytes + ? <= bytes_limit)`,
-		delta, now, backendName, delta)
+		  AND (bytes_limit = 0 OR bytes_used + orphan_bytes + ? <= bytes_limit)
+		  AND (
+			NOT EXISTS (SELECT 1 FROM backend_quota_groups WHERE backend_name = ?)
+			OR EXISTS (
+				SELECT 1 FROM backend_quota_groups m
+				JOIN quota_groups g ON g.name=m.quota_group
+				WHERE m.backend_name=? AND (
+					g.raw_limit_bytes=0 OR
+					COALESCE((SELECT SUM(b.bytes_used+b.orphan_bytes)
+						FROM backend_quotas b JOIN backend_quota_groups bm ON bm.backend_name=b.backend_name
+						WHERE bm.quota_group=g.name),0)+g.reserved_bytes+g.drift_bytes+?
+						<= g.raw_limit_bytes-g.static_buffer_bytes-g.dynamic_buffer_bytes
+				)
+			)
+		  )`,
+		delta, now, backendName, delta, backendName, backendName, delta)
 	if err != nil {
 		return fmt.Errorf("increment quota: %w", err)
 	}

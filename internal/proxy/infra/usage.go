@@ -15,8 +15,10 @@ package infra
 
 import (
 	"slices"
+	"sync"
 
 	"github.com/afreidah/s3-orchestrator/internal/counter"
+	"github.com/afreidah/s3-orchestrator/internal/store/core"
 )
 
 // usagePolicy owns the runtime usage tracker and the static per-backend
@@ -24,6 +26,7 @@ import (
 // backend config).
 type usagePolicy struct {
 	usage          *counter.UsageTracker
+	mu             sync.RWMutex
 	maxObjectSizes map[string]int64
 }
 
@@ -45,7 +48,16 @@ func (p *usagePolicy) Tracker() *counter.UsageTracker {
 // MaxObjectSize returns the per-backend max object size; 0 means
 // unlimited.
 func (p *usagePolicy) MaxObjectSize(name string) int64 {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
 	return p.maxObjectSizes[name]
+}
+
+func (p *usagePolicy) RegisterBackend(name string, maxObjectSize int64, limits core.UsageLimits) {
+	p.mu.Lock()
+	p.maxObjectSizes[name] = maxObjectSize
+	p.mu.Unlock()
+	p.usage.RegisterBackend(name, limits)
 }
 
 // WithinLimits combines the live quota check and the static max-object-

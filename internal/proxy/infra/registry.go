@@ -16,6 +16,7 @@ package infra
 import (
 	"fmt"
 	"slices"
+	"sync"
 
 	"github.com/afreidah/s3-orchestrator/internal/backend"
 	"github.com/afreidah/s3-orchestrator/internal/breaker"
@@ -26,6 +27,7 @@ import (
 // SetDrainChecker once the drain manager exists, since it is built after
 // the runtime.
 type backendRegistry struct {
+	mu       sync.RWMutex
 	backends map[string]backend.ObjectBackend
 	order    []string
 	drainMgr DrainChecker
@@ -41,21 +43,33 @@ func newBackendRegistry(backends map[string]backend.ObjectBackend, order []strin
 // SetDrainChecker installs the drain manager after BackendRuntime has been
 // constructed.
 func (r *backendRegistry) SetDrainChecker(d DrainChecker) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.drainMgr = d
 }
 
 // All returns the backend map (read-only contract).
 func (r *backendRegistry) All() map[string]backend.ObjectBackend {
-	return r.backends
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	result := make(map[string]backend.ObjectBackend, len(r.backends))
+	for name, be := range r.backends {
+		result[name] = be
+	}
+	return result
 }
 
 // Order returns the configured backend iteration order.
 func (r *backendRegistry) Order() []string {
-	return r.order
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return slices.Clone(r.order)
 }
 
 // Get returns the named backend, or an error if it doesn't exist.
 func (r *backendRegistry) Get(name string) (backend.ObjectBackend, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	b, ok := r.backends[name]
 	if !ok {
 		return nil, fmt.Errorf("backend %s not found", name)
@@ -63,14 +77,29 @@ func (r *backendRegistry) Get(name string) (backend.ObjectBackend, error) {
 	return b, nil
 }
 
+// Add registers a backend and appends it to the deterministic routing order.
+func (r *backendRegistry) Add(name string, be backend.ObjectBackend) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, exists := r.backends[name]; exists {
+		return fmt.Errorf("backend %s already exists", name)
+	}
+	r.backends[name] = be
+	r.order = append(r.order, name)
+	return nil
+}
+
 // IsDraining returns true if the named backend is currently being
 // drained. Returns false when no drain manager is set (e.g. early
 // startup before SetDrainChecker).
 func (r *backendRegistry) IsDraining(name string) bool {
-	if r.drainMgr == nil {
+	r.mu.RLock()
+	drainMgr := r.drainMgr
+	r.mu.RUnlock()
+	if drainMgr == nil {
 		return false
 	}
-	return r.drainMgr.IsDraining(name)
+	return drainMgr.IsDraining(name)
 }
 
 // ExcludeDraining filters out backends that are currently draining.
@@ -83,8 +112,8 @@ func (r *backendRegistry) ExcludeDraining(eligible []string) []string {
 // through unconditionally.
 func (r *backendRegistry) ExcludeUnhealthy(eligible []string) []string {
 	return slices.DeleteFunc(slices.Clone(eligible), func(name string) bool {
-		b, ok := r.backends[name]
-		if !ok {
+		b, err := r.Get(name)
+		if err != nil {
 			return true
 		}
 		cb, ok := b.(*backend.CircuitBreakerBackend)

@@ -75,11 +75,12 @@ type RedisClient interface {
 // cross-instance visibility. Falls back to local counters when Redis is
 // unavailable.
 type RedisCounterBackend struct {
-	client   RedisClient
-	prefix   string
-	local    *LocalCounterBackend
-	cb       *breaker.CircuitBreaker
-	backends []string
+	client    RedisClient
+	prefix    string
+	local     *LocalCounterBackend
+	cb        *breaker.CircuitBreaker
+	backendMu sync.RWMutex
+	backends  []string
 	// log is the component-scoped logger; populated by NewRedisCounterBackend.
 	// Tests construct this type directly and may leave log nil, so callers
 	// route through (r *RedisCounterBackend).logger() to get a safe default.
@@ -152,7 +153,24 @@ func NewRedisCounterBackend(client RedisClient, cfg *config.RedisConfig, backend
 
 // Backends returns the list of backend names this counter tracks.
 func (r *RedisCounterBackend) Backends() []string {
-	return r.backends
+	r.backendMu.RLock()
+	defer r.backendMu.RUnlock()
+	return append([]string(nil), r.backends...)
+}
+
+// RegisterBackend adds a runtime-created backend to Redis flush iteration and
+// to the local fallback counter.
+func (r *RedisCounterBackend) RegisterBackend(name string) {
+	r.backendMu.Lock()
+	for _, existing := range r.backends {
+		if existing == name {
+			r.backendMu.Unlock()
+			return
+		}
+	}
+	r.backends = append(r.backends, name)
+	r.backendMu.Unlock()
+	r.local.RegisterBackend(name)
 }
 
 // Add increments a single counter field in Redis, falling back to local on error.

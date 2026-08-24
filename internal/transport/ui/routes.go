@@ -51,6 +51,8 @@ type uiAPIRoute struct {
 // whether the route is quota-tracked.
 var uiAPIRoutes = []uiAPIRoute{
 	{"/api/dashboard", func(h *Handler) http.HandlerFunc { return h.handleAPIDashboard }, quotaTrackingNone, ""},
+	{"/api/r2-accounts", func(h *Handler) http.HandlerFunc { return h.handleAPIR2Accounts }, quotaTrackingTracked,
+		"one-time HeadBucket validates the candidate before registration; it is intentionally outside operational counters"},
 	{"/api/tree", func(h *Handler) http.HandlerFunc { return h.handleTreeAPI }, quotaTrackingNone, ""},
 	{"/api/delete", func(h *Handler) http.HandlerFunc { return h.handleAPIDelete }, quotaTrackingTracked,
 		"objects.DeleteObject -> objects_write.go usage.Record (1 API)"},
