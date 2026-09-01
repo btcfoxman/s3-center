@@ -14,12 +14,46 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 
 	"github.com/afreidah/s3-orchestrator/internal/config"
 )
+
+func TestPresignPutObjectReturnsBrowserSafeRequiredHeaders(t *testing.T) {
+	t.Parallel()
+	be := newTestBackend(t, func(http.ResponseWriter, *http.Request) {})
+
+	request, err := be.PresignPutObject(t.Context(), "__objects/du_test.txt", "text/plain", "du_test", time.Minute)
+	if err != nil {
+		t.Fatalf("PresignPutObject: %v", err)
+	}
+	if request.Headers.Get("Content-Type") != "text/plain" {
+		t.Fatalf("Content-Type header = %q, want text/plain", request.Headers.Get("Content-Type"))
+	}
+	if request.Headers.Get("X-Amz-Meta-Upload-Id") != "du_test" {
+		t.Fatalf("upload marker header = %q, want du_test", request.Headers.Get("X-Amz-Meta-Upload-Id"))
+	}
+	if request.Headers.Get("Host") != "" {
+		t.Fatalf("browser response must not require forbidden Host header: %v", request.Headers)
+	}
+	signedHeaders := urlValues(t, request.URL).Get("X-Amz-SignedHeaders")
+	if !strings.Contains(signedHeaders, "x-amz-meta-upload-id") {
+		t.Fatalf("signed headers = %q, want upload marker", signedHeaders)
+	}
+}
+
+func urlValues(t *testing.T, rawURL string) url.Values {
+	t.Helper()
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		t.Fatalf("parse presigned URL: %v", err)
+	}
+	return parsed.Query()
+}
 
 func TestNewBackendTransportUsesAccountProxy(t *testing.T) {
 	t.Parallel()

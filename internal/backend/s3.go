@@ -298,9 +298,9 @@ func (b *S3Backend) PutObject(ctx context.Context, key string, body io.Reader, s
 		})
 }
 
-// PresignPutObject authorizes exactly one immutable physical key. Content-Type
-// and the session marker are signed so completion can verify the upload belongs
-// to the reservation being committed.
+// PresignPutObject authorizes exactly one immutable physical key. The session
+// marker is signed and Content-Type is returned as a required client header so
+// completion can verify the upload belongs to the reservation being committed.
 func (b *S3Backend) PresignPutObject(ctx context.Context, key, contentType, uploadID string, expires time.Duration) (*PresignedPut, error) {
 	input := &s3.PutObjectInput{Bucket: aws.String(b.bucket), Key: aws.String(key), Metadata: map[string]string{"upload-id": uploadID}}
 	if contentType != "" {
@@ -310,7 +310,26 @@ func (b *S3Backend) PresignPutObject(ctx context.Context, key, contentType, uplo
 	if err != nil {
 		return nil, fmt.Errorf("presign put object: %w", err)
 	}
-	return &PresignedPut{URL: result.URL, Method: result.Method, Headers: result.SignedHeader, ExpiresAt: time.Now().Add(expires).UTC()}, nil
+	headers := browserRequiredHeaders(result.SignedHeader)
+	// The AWS presigner does not consistently include Content-Type in
+	// SignedHeader for S3-compatible providers. It is still a required request
+	// header: completion HEADs the object and rejects a different value.
+	if contentType != "" {
+		headers.Set("Content-Type", contentType)
+	}
+	return &PresignedPut{URL: result.URL, Method: result.Method, Headers: headers, ExpiresAt: time.Now().Add(expires).UTC()}, nil
+}
+
+// browserRequiredHeaders removes Host from SDK-presigner output. Browsers are
+// forbidden from setting Host themselves and curl/SDK clients derive the same
+// value from the presigned URL, so exposing it is both unnecessary and harmful.
+func browserRequiredHeaders(signed http.Header) http.Header {
+	headers := signed.Clone()
+	if headers == nil {
+		headers = make(http.Header)
+	}
+	headers.Del("Host")
+	return headers
 }
 
 // PresignGetObject returns a time-limited URL for reading the physical object
@@ -322,7 +341,7 @@ func (b *S3Backend) PresignGetObject(ctx context.Context, key string, expires ti
 	if err != nil {
 		return nil, fmt.Errorf("presign get object: %w", err)
 	}
-	return &PresignedRequest{URL: result.URL, Method: result.Method, Headers: result.SignedHeader, ExpiresAt: time.Now().Add(expires).UTC()}, nil
+	return &PresignedRequest{URL: result.URL, Method: result.Method, Headers: browserRequiredHeaders(result.SignedHeader), ExpiresAt: time.Now().Add(expires).UTC()}, nil
 }
 
 // PresignHeadObject returns a time-limited URL for reading physical object
@@ -334,7 +353,7 @@ func (b *S3Backend) PresignHeadObject(ctx context.Context, key string, expires t
 	if err != nil {
 		return nil, fmt.Errorf("presign head object: %w", err)
 	}
-	return &PresignedRequest{URL: result.URL, Method: result.Method, Headers: result.SignedHeader, ExpiresAt: time.Now().Add(expires).UTC()}, nil
+	return &PresignedRequest{URL: result.URL, Method: result.Method, Headers: browserRequiredHeaders(result.SignedHeader), ExpiresAt: time.Now().Add(expires).UTC()}, nil
 }
 
 // CreateMultipartObject starts a native upstream multipart upload. The session
@@ -370,7 +389,7 @@ func (b *S3Backend) PresignUploadPart(ctx context.Context, key, upstreamUploadID
 	if err != nil {
 		return nil, fmt.Errorf("presign upload part: %w", err)
 	}
-	return &PresignedRequest{URL: result.URL, Method: result.Method, Headers: result.SignedHeader, ExpiresAt: time.Now().Add(expires).UTC()}, nil
+	return &PresignedRequest{URL: result.URL, Method: result.Method, Headers: browserRequiredHeaders(result.SignedHeader), ExpiresAt: time.Now().Add(expires).UTC()}, nil
 }
 
 // CompleteMultipartObject asks the upstream provider to assemble already
