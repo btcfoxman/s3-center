@@ -10,6 +10,7 @@ package backend
 
 import (
 	"bytes"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -22,6 +23,31 @@ import (
 
 	"github.com/afreidah/s3-orchestrator/internal/config"
 )
+
+func TestPresignedRequestJSONUsesPublicContractFieldNames(t *testing.T) {
+	t.Parallel()
+	raw, err := json.Marshal(&PresignedRequest{
+		URL: "https://upstream.invalid/object", Method: http.MethodPut,
+		Headers: http.Header{"X-Test": {"value"}}, ExpiresAt: time.Unix(1, 0).UTC(),
+	})
+	if err != nil {
+		t.Fatalf("marshal PresignedRequest: %v", err)
+	}
+	var response map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &response); err != nil {
+		t.Fatalf("unmarshal PresignedRequest: %v", err)
+	}
+	for _, field := range []string{"url", "method", "headers", "expires_at"} {
+		if _, ok := response[field]; !ok {
+			t.Fatalf("public JSON field %q is missing from %s", field, raw)
+		}
+	}
+	for _, field := range []string{"URL", "Method", "Headers", "ExpiresAt"} {
+		if _, ok := response[field]; ok {
+			t.Fatalf("internal JSON field %q leaked in %s", field, raw)
+		}
+	}
+}
 
 func TestPresignPutObjectReturnsBrowserSafeRequiredHeaders(t *testing.T) {
 	t.Parallel()

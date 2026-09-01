@@ -71,10 +71,10 @@ type HeadObjectResult struct {
 // directly to an upstream backend. Object bytes never traverse the
 // orchestrator when this capability is used.
 type PresignedRequest struct {
-	URL       string
-	Method    string
-	Headers   http.Header
-	ExpiresAt time.Time
+	URL       string      `json:"url"`
+	Method    string      `json:"method"`
+	Headers   http.Header `json:"headers"`
+	ExpiresAt time.Time   `json:"expires_at"`
 }
 
 // PresignedPut is retained as an alias for the original direct-upload API.
