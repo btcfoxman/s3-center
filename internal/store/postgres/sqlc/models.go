@@ -159,20 +159,21 @@ type QuotaGroup struct {
 }
 
 type UploadSession struct {
-	ID             string
-	IdempotencyKey string
-	LogicalKey     string
-	PhysicalKey    string
-	BackendName    string
-	QuotaGroup     string
-	Status         string
-	DeclaredBytes  int64
-	ReservedBytes  int64
-	ActualBytes    *int64
-	ContentType    *string
-	Etag           *string
-	ExpiresAt      pgtype.Timestamptz
-	CreatedAt      pgtype.Timestamptz
-	UpdatedAt      pgtype.Timestamptz
-	LastError      *string
+	ID               string
+	IdempotencyKey   string
+	LogicalKey       string
+	PhysicalKey      string
+	BackendName      string
+	QuotaGroup       string
+	Status           string
+	DeclaredBytes    int64
+	ReservedBytes    int64
+	ActualBytes      *int64
+	ContentType      *string
+	Etag             *string
+	ExpiresAt        pgtype.Timestamptz
+	CreatedAt        pgtype.Timestamptz
+	UpdatedAt        pgtype.Timestamptz
+	LastError        *string
+	UpstreamUploadID *string
 }
