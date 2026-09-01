@@ -124,6 +124,10 @@ func (h *Handler) handleAPIDeletePrefix(w http.ResponseWriter, r *http.Request) 
 // handleAPIUpload uploads a file via multipart form data.
 func (h *Handler) handleAPIUpload(w http.ResponseWriter, r *http.Request) {
 	setSecurityHeaders(w)
+	if h.indexOnly() {
+		h.writeIndexOnlyDataPlaneError(w)
+		return
+	}
 
 	if !httputil.RequireMethod(w, r, http.MethodPost) {
 		return
@@ -173,6 +177,10 @@ func uploadContentType(header *multipart.FileHeader) string {
 // handleAPIDownload streams an object to the browser as a file download.
 func (h *Handler) handleAPIDownload(w http.ResponseWriter, r *http.Request) {
 	setSecurityHeaders(w)
+	if h.indexOnly() {
+		h.writeIndexOnlyDataPlaneError(w)
+		return
+	}
 
 	if !httputil.RequireMethod(w, r, http.MethodGet) {
 		return
@@ -194,6 +202,15 @@ func (h *Handler) handleAPIDownload(w http.ResponseWriter, r *http.Request) {
 	}
 
 	_, _ = bufpool.Copy(w, result.Body)
+}
+
+func (h *Handler) writeIndexOnlyDataPlaneError(w http.ResponseWriter) {
+	httputil.WriteJSONError(w, http.StatusConflict, "index-only mode forbids proxying object bodies; use /direct/ or the v1 control API")
+}
+
+func (h *Handler) indexOnly() bool {
+	cfg := h.cfg.Load()
+	return cfg != nil && cfg.DirectUpload.IndexOnly
 }
 
 // writeObjectError renders a failed object operation, keeping the rejection

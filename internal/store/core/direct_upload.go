@@ -15,22 +15,23 @@ const (
 )
 
 type UploadSession struct {
-	ID             string
-	IdempotencyKey string
-	LogicalKey     string
-	PhysicalKey    string
-	BackendName    string
-	QuotaGroup     string
-	Status         string
-	DeclaredBytes  int64
-	ReservedBytes  int64
-	ActualBytes    int64
-	ContentType    string
-	ETag           string
-	ExpiresAt      time.Time
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
-	LastError      string
+	ID               string
+	IdempotencyKey   string
+	LogicalKey       string
+	PhysicalKey      string
+	BackendName      string
+	QuotaGroup       string
+	Status           string
+	DeclaredBytes    int64
+	ReservedBytes    int64
+	ActualBytes      int64
+	ContentType      string
+	ETag             string
+	UpstreamUploadID string `json:"-"`
+	ExpiresAt        time.Time
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
+	LastError        string
 }
 
 type CapacityGroupStat struct {
@@ -62,6 +63,7 @@ type ReserveUploadParams struct {
 type DirectUploadStore interface {
 	ReserveUpload(context.Context, *ReserveUploadParams) (*UploadSession, error)
 	MarkUploadURLIssued(context.Context, string) error
+	SetUploadMultipartID(context.Context, string, string) error
 	GetUploadSession(context.Context, string) (*UploadSession, error)
 	CommitUpload(context.Context, string, int64, string) ([]DeletedCopy, error)
 	AbortUpload(context.Context, string, string, bool) error

@@ -1151,6 +1151,32 @@ func TestAPIUpload_WrongMethod(t *testing.T) {
 	}
 }
 
+func TestIndexOnlyModeRejectsUIObjectBodyProxy(t *testing.T) {
+	t.Parallel()
+	h, mux := newTestHandler(t)
+	cfg := h.cfg.Load()
+	cfg.DirectUpload = config.DirectUploadConfig{Enabled: true, IndexOnly: true}
+	h.UpdateConfig(cfg)
+
+	for _, endpoint := range []struct {
+		method string
+		path   string
+	}{
+		{method: http.MethodPost, path: "/ui/api/upload"},
+		{method: http.MethodGet, path: "/ui/api/download?key=test-bucket/file.txt"},
+	} {
+		req := authedRequest(t, h, mux, endpoint.method, endpoint.path, nil)
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req)
+		if w.Code != http.StatusConflict {
+			t.Errorf("%s %s status = %d, want %d", endpoint.method, endpoint.path, w.Code, http.StatusConflict)
+		}
+		if !strings.Contains(w.Body.String(), "index-only") {
+			t.Errorf("%s %s response did not explain index-only mode: %s", endpoint.method, endpoint.path, w.Body.String())
+		}
+	}
+}
+
 // TestAPIUpload_MissingKey verifies the apiupload missing key contract.
 // Asserts that status = , want 400.
 func TestAPIUpload_MissingKey(t *testing.T) {

@@ -121,7 +121,7 @@ Deeper details: [docs/architecture.md](docs/architecture.md).
 |---|---|
 | First-run / demo | [Quickstart](docs/quickstart.md) |
 | S3 client setup | [User Guide](docs/user-guide.md) |
-| Production external-system setup | [S3 Center production integration](deploy/production/EXTERNAL-S3.md) |
+| Index-mode third-party API | [Zero-proxy integration guide](deploy/production/INDEX-MODE-API.md) · [OpenAPI](deploy/production/index-mode-openapi.yaml) |
 | Dynamic Cloudflare R2 onboarding | [Account proxy, quota cards, and alerts](deploy/production/R2-ACCOUNT-MANAGEMENT.md) |
 | Architecture | [docs/architecture.md](docs/architecture.md) |
 | Configuration walkthrough + hot-reload | [docs/configuration.md](docs/configuration.md) |

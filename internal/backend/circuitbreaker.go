@@ -121,6 +121,69 @@ func (cb *CircuitBreakerBackend) PresignPutObject(ctx context.Context, key, cont
 	})
 }
 
+// PresignGetObject delegates index-mode direct reads through the backend
+// breaker so an already-open backend is not selected for newly-issued URLs.
+func (cb *CircuitBreakerBackend) PresignGetObject(ctx context.Context, key string, expires time.Duration) (*PresignedRequest, error) {
+	direct, ok := cb.real.(DirectObjectBackend)
+	if !ok {
+		return nil, ErrCopyNotSupported
+	}
+	return breaker.CBCall(cb.CircuitBreaker, func() (*PresignedRequest, error) {
+		return direct.PresignGetObject(ctx, key, expires)
+	})
+}
+
+// PresignHeadObject delegates index-mode direct metadata access.
+func (cb *CircuitBreakerBackend) PresignHeadObject(ctx context.Context, key string, expires time.Duration) (*PresignedRequest, error) {
+	direct, ok := cb.real.(DirectObjectBackend)
+	if !ok {
+		return nil, ErrCopyNotSupported
+	}
+	return breaker.CBCall(cb.CircuitBreaker, func() (*PresignedRequest, error) {
+		return direct.PresignHeadObject(ctx, key, expires)
+	})
+}
+
+func (cb *CircuitBreakerBackend) CreateMultipartObject(ctx context.Context, key, contentType, sessionID string) (string, error) {
+	direct, ok := cb.real.(DirectMultipartBackend)
+	if !ok {
+		return "", ErrCopyNotSupported
+	}
+	return breaker.CBCall(cb.CircuitBreaker, func() (string, error) {
+		return direct.CreateMultipartObject(ctx, key, contentType, sessionID)
+	})
+}
+
+func (cb *CircuitBreakerBackend) PresignUploadPart(ctx context.Context, key, upstreamUploadID string, partNumber int, expires time.Duration) (*PresignedRequest, error) {
+	direct, ok := cb.real.(DirectMultipartBackend)
+	if !ok {
+		return nil, ErrCopyNotSupported
+	}
+	return breaker.CBCall(cb.CircuitBreaker, func() (*PresignedRequest, error) {
+		return direct.PresignUploadPart(ctx, key, upstreamUploadID, partNumber, expires)
+	})
+}
+
+func (cb *CircuitBreakerBackend) CompleteMultipartObject(ctx context.Context, key, upstreamUploadID string, parts []CompletedPart) (string, error) {
+	direct, ok := cb.real.(DirectMultipartBackend)
+	if !ok {
+		return "", ErrCopyNotSupported
+	}
+	return breaker.CBCall(cb.CircuitBreaker, func() (string, error) {
+		return direct.CompleteMultipartObject(ctx, key, upstreamUploadID, parts)
+	})
+}
+
+func (cb *CircuitBreakerBackend) AbortMultipartObject(ctx context.Context, key, upstreamUploadID string) error {
+	direct, ok := cb.real.(DirectMultipartBackend)
+	if !ok {
+		return ErrCopyNotSupported
+	}
+	return breaker.CBCallNoResult(cb.CircuitBreaker, func() error {
+		return direct.AbortMultipartObject(ctx, key, upstreamUploadID)
+	})
+}
+
 // CopyObject forwards a server-side copy through the circuit breaker
 // when the wrapped backend implements BackendCopier. When it does not,
 // returns ErrCopyNotSupported so the caller falls back to materialized

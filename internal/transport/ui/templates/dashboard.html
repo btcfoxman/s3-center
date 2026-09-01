@@ -7,7 +7,7 @@
   <link rel="icon" type="image/svg+xml" href="static/favicon.svg">
   <link rel="stylesheet" href="static/style.css?v={{.Version}}">
 </head>
-<body class="dashboard-page">
+<body class="dashboard-page" data-index-only="{{.IndexOnly}}">
 <div class="ambient ambient-a" aria-hidden="true"></div>
 <div class="ambient ambient-b" aria-hidden="true"></div>
 <div class="container">
@@ -139,6 +139,9 @@
         <p>查看后端水位，并执行编排与维护操作</p>
       </div>
       <div class="action-toolbar" aria-label="存储后端操作">
+      {{if .IndexOnly}}
+      <span class="admin-action-status">索引模式已禁用搬运、复制及数据变换</span>
+      {{else}}
       <button id="rebalance-btn" class="btn-action" title="Move objects between backends to better match the configured routing strategy and even out space usage. Runs in the background; safe to trigger any time.">Rebalance</button>
       <button id="clean-excess-btn" class="btn-action" title="Delete extra object replicas that exceed the configured replication factor. Frees space without reducing redundancy below the target.">Clean Excess</button>
       <button id="sync-btn" class="btn-action" title="Scan a backend bucket and register objects that exist in storage but are missing from the orchestrator's metadata, mapping them into a virtual bucket.">Sync</button>
@@ -155,6 +158,7 @@
       <button id="decompress-existing-btn" class="btn-action" title="Rewrite every compressed object back to the bytes the client wrote. Long-running.">Decompress Existing</button>
       {{end}}
       <span id="admin-action-status" class="admin-action-status"></span>
+      {{end}}
       </div>
     </div>
     <table>
@@ -319,8 +323,12 @@
         <p>浏览、上传与维护虚拟存储桶中的对象</p>
       </div>
       <div class="upload-bar">
+        {{if .IndexOnly}}
+        <a href="/direct/" class="btn-upload"><span>前往索引工作台</span><b aria-hidden="true">↗</b></a>
+        {{else}}
         <button id="upload-btn" class="btn-upload"><span>上传对象</span><b aria-hidden="true">＋</b></button>
         <span id="upload-status"></span>
+        {{end}}
       </div>
     </div>
     <input type="file" id="upload-files-input" aria-label="Upload files" multiple hidden>

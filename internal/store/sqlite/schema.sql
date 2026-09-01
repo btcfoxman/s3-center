@@ -226,7 +226,7 @@ CREATE TABLE IF NOT EXISTS upload_sessions (
     backend_name TEXT NOT NULL REFERENCES backend_quotas(backend_name),
     quota_group TEXT NOT NULL REFERENCES quota_groups(name),
     status TEXT NOT NULL, declared_bytes INTEGER NOT NULL, reserved_bytes INTEGER NOT NULL,
-    actual_bytes INTEGER, content_type TEXT, etag TEXT, expires_at TEXT NOT NULL,
+    actual_bytes INTEGER, content_type TEXT, etag TEXT, upstream_upload_id TEXT, expires_at TEXT NOT NULL,
     created_at TEXT NOT NULL, updated_at TEXT NOT NULL, last_error TEXT
 );
 
@@ -249,4 +249,4 @@ CREATE TABLE IF NOT EXISTS managed_backends (
     updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 
-INSERT INTO schema_version (version) VALUES (9);
+INSERT INTO schema_version (version) VALUES (10);

@@ -11,7 +11,8 @@ selection is intentionally not stored in `.env`; the workflow passes
 Operator guides:
 
 - [Dynamic Cloudflare R2 account onboarding](R2-ACCOUNT-MANAGEMENT.md)
-- [External S3 client integration](EXTERNAL-S3.md)
+- [Index-mode third-party integration](INDEX-MODE-API.md)
+- [OpenAPI 3.1 contract](index-mode-openapi.yaml)
 
 Required GitHub secrets: `DEPLOY_HOST`, `DEPLOY_USER`, `DEPLOY_SSH_KEY`,
 `DEPLOY_PORT`, `DEPLOY_PATH`, `DEPLOY_SERVICE`, `GHCR_USERNAME`, and

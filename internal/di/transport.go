@@ -67,10 +67,11 @@ func ProvideDirectUploadHandler(i do.Injector) (*directapi.Handler, error) {
 	r := newResolver(i)
 	cfg := resolve[*config.Config](r)
 	manager := resolve[*directupload.Manager](r)
+	backendManager := resolve[*proxy.BackendManager](r)
 	if r.err != nil {
 		return nil, r.err
 	}
-	return directapi.New(manager, cfg.DirectUpload), nil
+	return directapi.New(manager, cfg.DirectUpload, backendManager.Objects()), nil
 }
 
 // ProvideBucketAuth creates the credential-to-bucket registry.

@@ -12,6 +12,8 @@
 (function () {
   'use strict';
 
+  const indexOnly = document.body.dataset.indexOnly === 'true';
+
   // --- Helpers ---
   function formatBytes(b) {
     if (b === 0) return '0 B';
@@ -96,7 +98,7 @@
     fDelSpan.textContent = '\u2715';
     div.appendChild(fNameSpan);
     div.appendChild(fMetaSpan);
-    div.appendChild(fDlSpan);
+    if (!indexOnly) div.appendChild(fDlSpan);
     div.appendChild(fDelSpan);
     return div;
   }
@@ -230,7 +232,7 @@
   }
 
   // --- Download ---
-  if (tree) {
+  if (tree && !indexOnly) {
     tree.addEventListener('click', function (e) {
       let btn = e.target.closest('.tree-download');
       if (!btn) return;

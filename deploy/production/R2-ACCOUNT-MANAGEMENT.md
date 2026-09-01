@@ -41,7 +41,7 @@ socks5h://user:password@proxy.example:1080
 
 代理是 Backend 级配置：该账号由 S3 Center 发起的上传、下载、检查和维护操作都走自己的连接池与代理，不影响其他账号。管理端只显示脱敏后的 `scheme://host:port`。
 
-> 浏览器直传使用 R2 预签名 URL，数据从浏览器直接到 R2，不经过 S3 Center 的服务端代理。如果该账号必须绑定固定代理 IP，请禁用/避免直传，让客户端通过 S3 Center 的 S3 API 上传，或让客户端本身具备相同网络出口。
+> 索引模式下，代理只约束 S3 Center 发起的 `HeadBucket`、`HEAD`、`DELETE` 和 Multipart 控制调用。文件 PUT/GET 使用 R2 预签名 URL，由第三方客户端直接连接 R2，不经过 S3 Center 的代理。如果 R2 凭据策略强制固定来源 IP，第三方客户端本身也必须使用获准出口；否则该账号不适合加入零代理数据平面。
 
 ## 额度卡如何理解
 

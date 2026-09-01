@@ -15,10 +15,10 @@ import (
 func scanUpload(row pgx.Row) (*core.UploadSession, error) {
 	var u core.UploadSession
 	var actual *int64
-	var contentType, etag, lastError *string
+	var contentType, etag, upstreamUploadID, lastError *string
 	err := row.Scan(&u.ID, &u.IdempotencyKey, &u.LogicalKey, &u.PhysicalKey,
 		&u.BackendName, &u.QuotaGroup, &u.Status, &u.DeclaredBytes, &u.ReservedBytes,
-		&actual, &contentType, &etag, &u.ExpiresAt, &u.CreatedAt, &u.UpdatedAt, &lastError)
+		&actual, &contentType, &etag, &upstreamUploadID, &u.ExpiresAt, &u.CreatedAt, &u.UpdatedAt, &lastError)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, core.ErrUploadSessionNotFound
 	}
@@ -34,6 +34,9 @@ func scanUpload(row pgx.Row) (*core.UploadSession, error) {
 	if etag != nil {
 		u.ETag = *etag
 	}
+	if upstreamUploadID != nil {
+		u.UpstreamUploadID = *upstreamUploadID
+	}
 	if lastError != nil {
 		u.LastError = *lastError
 	}
@@ -41,7 +44,7 @@ func scanUpload(row pgx.Row) (*core.UploadSession, error) {
 }
 
 const uploadColumns = `id, idempotency_key, logical_key, physical_key, backend_name, quota_group,
-	status, declared_bytes, reserved_bytes, actual_bytes, content_type, etag,
+	status, declared_bytes, reserved_bytes, actual_bytes, content_type, etag, upstream_upload_id,
 	expires_at, created_at, updated_at, last_error`
 
 //nolint:gocognit // Keeping selection and reservation in one transaction is the oversubscription invariant.
@@ -118,6 +121,18 @@ func (s *Store) MarkUploadURLIssued(ctx context.Context, id string) error {
 	tag, err := s.pool.Exec(ctx, `UPDATE upload_sessions SET status=$1,updated_at=NOW() WHERE id=$2 AND status=$3`, core.UploadURLIssued, id, core.UploadReserved)
 	if err != nil {
 		return fmt.Errorf("mark upload URL issued: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return core.ErrUploadSessionConflict
+	}
+	return nil
+}
+
+func (s *Store) SetUploadMultipartID(ctx context.Context, id, upstreamID string) error {
+	tag, err := s.pool.Exec(ctx, `UPDATE upload_sessions SET upstream_upload_id=$1,updated_at=NOW()
+		WHERE id=$2 AND upstream_upload_id IS NULL AND status=$3`, upstreamID, id, core.UploadReserved)
+	if err != nil {
+		return fmt.Errorf("set upstream multipart id: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
 		return core.ErrUploadSessionConflict

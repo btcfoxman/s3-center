@@ -130,6 +130,13 @@ func registerUIHandler(mux *http.ServeMux, inj do.Injector, cfg *config.Config) 
 //
 // Either form respects LoadShedThreshold and AdmissionWait when set.
 func registerS3Handler(mux *http.ServeMux, inj do.Injector, cfg *config.Config) error {
+	if cfg.DirectUpload.IndexOnly {
+		slog.InfoContext(context.Background(), "S3 data proxy disabled; index-only control plane active",
+			logfmt.Component("httpserver"),
+			"control_path", "/v1/objects",
+		)
+		return nil
+	}
 	manager, err := do.Invoke[*proxy.BackendManager](inj)
 	if err != nil {
 		return fmt.Errorf("initialize backend manager: %w", err)

@@ -37,7 +37,7 @@ backends:
     secret_access_key: "${R2_SECRET_ACCESS_KEY}"
     force_path_style: true
     quota_bytes: 8000000000
-    max_object_size: 268435456
+    max_object_size: 5497558138880
     quota_group: "cf-${CF_ACCOUNT_ID}"
     raw_limit_bytes: 10000000000
     static_buffer_bytes: 1000000000
@@ -71,15 +71,18 @@ ui:
 
 direct_upload:
   enabled: true
+  index_only: true
   console_host: s3-center.aiid.qzz.io
   presign_ttl: "10m"
   session_ttl: "10m"
   reaper_interval: "1m"
   max_object_size: 268435456
+  max_multipart_object_size: 5497558138880
   tokens:
     - name: production
       token: "${DIRECT_UPLOAD_TOKEN}"
-      scopes: ["uploads:write", "uploads:read"]
+      scopes: ["uploads:write", "uploads:read", "objects:read", "objects:list", "objects:delete"]
+      buckets: ["assets"]
 
 managed_backends:
   enabled: true
@@ -95,7 +98,7 @@ backend_circuit_breaker:
   open_timeout: "15s"
 
 cache:
-  enabled: true
+  enabled: false
   max_size: "128MB"
   max_object_size: "8MB"
   ttl: "5m"

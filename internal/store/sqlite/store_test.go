@@ -69,6 +69,11 @@ func newTestStore(t *testing.T) *Store {
 func rewindToSchemaVersion(t *testing.T, s *Store, version int) {
 	t.Helper()
 	ctx := context.Background()
+	if version < 10 {
+		if _, err := s.db.ExecContext(ctx, `ALTER TABLE upload_sessions DROP COLUMN upstream_upload_id`); err != nil {
+			t.Fatalf("drop upload_sessions.upstream_upload_id: %v", err)
+		}
+	}
 	if version < 9 {
 		if _, err := s.db.ExecContext(ctx, `DROP TABLE IF EXISTS managed_backends`); err != nil {
 			t.Fatalf("drop managed_backends: %v", err)

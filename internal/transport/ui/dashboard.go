@@ -44,6 +44,7 @@ type dashboardPage struct {
 	TotalOrphanBytes       int64
 	CloudflareAccounts     []cloudflareAccountUsage
 	ManagedBackendsEnabled bool
+	IndexOnly              bool
 }
 
 type cloudflareAccountUsage struct {
@@ -258,6 +259,7 @@ func (h *Handler) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		TotalBytesLimit:        totalLimit,
 		TotalOrphanBytes:       totalOrphan,
 		ManagedBackendsEnabled: h.backendManagement != nil && h.backendManagement.Enabled(),
+		IndexOnly:              cfg.DirectUpload.IndexOnly,
 		Config: configSummary{
 			RoutingStrategy:           string(cfg.RoutingStrategy),
 			ReplicationFactor:         cfg.Replication.Factor,

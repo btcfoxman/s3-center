@@ -14,15 +14,15 @@ import (
 type uploadRowScanner interface{ Scan(...any) error }
 
 const uploadColumns = `id,idempotency_key,logical_key,physical_key,backend_name,quota_group,
-	status,declared_bytes,reserved_bytes,actual_bytes,content_type,etag,expires_at,created_at,updated_at,last_error`
+	status,declared_bytes,reserved_bytes,actual_bytes,content_type,etag,upstream_upload_id,expires_at,created_at,updated_at,last_error`
 
 func scanUpload(row uploadRowScanner) (*core.UploadSession, error) {
 	var u core.UploadSession
 	var actual sql.NullInt64
-	var contentType, etag, lastError sql.NullString
+	var contentType, etag, upstreamUploadID, lastError sql.NullString
 	var expires, created, updated string
 	err := row.Scan(&u.ID, &u.IdempotencyKey, &u.LogicalKey, &u.PhysicalKey, &u.BackendName, &u.QuotaGroup,
-		&u.Status, &u.DeclaredBytes, &u.ReservedBytes, &actual, &contentType, &etag, &expires, &created, &updated, &lastError)
+		&u.Status, &u.DeclaredBytes, &u.ReservedBytes, &actual, &contentType, &etag, &upstreamUploadID, &expires, &created, &updated, &lastError)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, core.ErrUploadSessionNotFound
 	}
@@ -32,6 +32,7 @@ func scanUpload(row uploadRowScanner) (*core.UploadSession, error) {
 	u.ActualBytes = actual.Int64
 	u.ContentType = contentType.String
 	u.ETag = etag.String
+	u.UpstreamUploadID = upstreamUploadID.String
 	u.LastError = lastError.String
 	if u.ExpiresAt, err = parseTime(expires); err != nil {
 		return nil, err
@@ -105,6 +106,17 @@ func (s *Store) ReserveUpload(ctx context.Context, p *core.ReserveUploadParams) 
 
 func (s *Store) MarkUploadURLIssued(ctx context.Context, id string) error {
 	res, err := s.db.ExecContext(ctx, `UPDATE upload_sessions SET status=?,updated_at=? WHERE id=? AND status=?`, core.UploadURLIssued, now(), id, core.UploadReserved)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return core.ErrUploadSessionConflict
+	}
+	return nil
+}
+func (s *Store) SetUploadMultipartID(ctx context.Context, id, upstreamID string) error {
+	res, err := s.db.ExecContext(ctx, `UPDATE upload_sessions SET upstream_upload_id=?,updated_at=? WHERE id=? AND upstream_upload_id IS NULL AND status=?`, upstreamID, now(), id, core.UploadReserved)
 	if err != nil {
 		return err
 	}

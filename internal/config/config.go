@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"reflect"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -120,7 +121,40 @@ func (c *Config) SetDefaultsAndValidate() error {
 	c.applyDefaultsOnlyTypes()
 	errs = append(errs, c.validateRoutingStrategy()...)
 	errs = append(errs, c.validateQuotaReplicationCombo()...)
+	errs = append(errs, c.validateIndexOnlyMode()...)
 	return errors.Join(errs...)
+}
+
+// validateIndexOnlyMode rejects features that require object bodies to pass
+// through the orchestrator. Index-only deployments may still make small S3
+// control calls (HEAD/DELETE/finalize) but never transform or replicate bytes.
+func (c *Config) validateIndexOnlyMode() []error {
+	if !c.DirectUpload.IndexOnly {
+		return nil
+	}
+	var errs []error
+	if !c.DirectUpload.Enabled {
+		errs = append(errs, fmt.Errorf("direct_upload.index_only requires direct_upload.enabled"))
+	}
+	if c.Encryption.Enabled {
+		errs = append(errs, fmt.Errorf("direct_upload.index_only is incompatible with encryption.enabled"))
+	}
+	if c.Compression.Enabled {
+		errs = append(errs, fmt.Errorf("direct_upload.index_only is incompatible with compression.enabled"))
+	}
+	if c.Cache.Enabled {
+		errs = append(errs, fmt.Errorf("direct_upload.index_only is incompatible with cache.enabled"))
+	}
+	if c.Replication.Factor > 1 {
+		errs = append(errs, fmt.Errorf("direct_upload.index_only requires replication.factor <= 1"))
+	}
+	if c.Rebalance.Enabled {
+		errs = append(errs, fmt.Errorf("direct_upload.index_only is incompatible with rebalance.enabled"))
+	}
+	if c.Integrity.Enabled {
+		errs = append(errs, fmt.Errorf("direct_upload.index_only is incompatible with integrity.enabled"))
+	}
+	return errs
 }
 
 // validatePerTypeSections delegates to each sub-type's
@@ -267,8 +301,8 @@ func serverFieldsChanged(old, new *ServerConfig) []string {
 }
 
 // topLevelFieldsChanged enumerates non-reloadable top-level sub-configs
-// that differ (database, telemetry, UI, circuit breakers, encryption,
-// routing strategy).
+// that differ (database, telemetry, UI, direct control API, circuit breakers,
+// encryption, routing strategy).
 func topLevelFieldsChanged(old, new *Config) []string {
 	var changed []string
 	if old.Database != new.Database {
@@ -282,6 +316,9 @@ func topLevelFieldsChanged(old, new *Config) []string {
 	}
 	if old.ManagedBackends != new.ManagedBackends {
 		changed = append(changed, "managed_backends")
+	}
+	if !reflect.DeepEqual(old.DirectUpload, new.DirectUpload) {
+		changed = append(changed, "direct_upload")
 	}
 	if circuitBreakerChanged(old.CircuitBreaker, new.CircuitBreaker) {
 		changed = append(changed, "circuit_breaker")

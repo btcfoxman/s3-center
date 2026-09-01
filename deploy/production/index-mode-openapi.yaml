@@ -1,0 +1,282 @@
+openapi: 3.1.0
+info:
+  title: S3 Center Index Mode API
+  version: 1.0.0
+  description: Control-plane API. Object bodies transfer directly between the client and the selected upstream R2/S3.
+servers:
+  - url: https://s3-api.aiid.qzz.io
+security:
+  - bearerAuth: []
+paths:
+  /v1/uploads:
+    post:
+      operationId: createUpload
+      summary: Reserve capacity and authorize one direct PUT
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CreateUpload'}
+      responses:
+        '201':
+          description: Direct PUT authorized
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/UploadGrant'}
+        default: {$ref: '#/components/responses/Error'}
+  /v1/uploads/{id}:
+    get:
+      operationId: getUpload
+      summary: Get an upload session
+      parameters: [{$ref: '#/components/parameters/SessionID'}]
+      responses:
+        '200':
+          description: Session state
+          content: {application/json: {schema: {$ref: '#/components/schemas/Session'}}}
+        default: {$ref: '#/components/responses/Error'}
+    delete:
+      operationId: abortUpload
+      summary: Abort a single-PUT upload session
+      parameters: [{$ref: '#/components/parameters/SessionID'}]
+      responses:
+        '204': {description: Aborted}
+        default: {$ref: '#/components/responses/Error'}
+  /v1/uploads/{id}/complete:
+    post:
+      operationId: completeUpload
+      summary: Verify the upstream object and commit its logical index entry
+      parameters: [{$ref: '#/components/parameters/SessionID'}]
+      responses:
+        '200':
+          description: Committed session
+          content: {application/json: {schema: {$ref: '#/components/schemas/Session'}}}
+        default: {$ref: '#/components/responses/Error'}
+  /v1/multipart:
+    post:
+      operationId: createMultipartUpload
+      summary: Reserve capacity and start a native upstream multipart upload
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/CreateUpload'}}}
+      responses:
+        '201':
+          description: Multipart session created
+          content: {application/json: {schema: {$ref: '#/components/schemas/Session'}}}
+        default: {$ref: '#/components/responses/Error'}
+  /v1/multipart/{id}/parts/presign:
+    post:
+      operationId: presignMultipartPart
+      summary: Authorize one direct upstream UploadPart
+      parameters: [{$ref: '#/components/parameters/SessionID'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [part_number]
+              properties:
+                part_number: {type: integer, minimum: 1, maximum: 10000}
+      responses:
+        '200':
+          description: Part request
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [part_number, request]
+                properties:
+                  part_number: {type: integer}
+                  request: {$ref: '#/components/schemas/PresignedRequest'}
+        default: {$ref: '#/components/responses/Error'}
+  /v1/multipart/{id}/complete:
+    post:
+      operationId: completeMultipartUpload
+      summary: Assemble upstream parts, verify, and commit the index entry
+      parameters: [{$ref: '#/components/parameters/SessionID'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [parts]
+              properties:
+                parts:
+                  type: array
+                  minItems: 1
+                  maxItems: 10000
+                  items: {$ref: '#/components/schemas/CompletedPart'}
+      responses:
+        '200':
+          description: Committed session
+          content: {application/json: {schema: {$ref: '#/components/schemas/Session'}}}
+        default: {$ref: '#/components/responses/Error'}
+  /v1/multipart/{id}/abort:
+    delete:
+      operationId: abortMultipartUpload
+      summary: Abort the native upstream multipart upload
+      parameters: [{$ref: '#/components/parameters/SessionID'}]
+      responses:
+        '204': {description: Aborted}
+        default: {$ref: '#/components/responses/Error'}
+  /v1/objects:
+    get:
+      operationId: listObjects
+      summary: List logical objects from the metadata index only
+      parameters:
+        - {name: bucket, in: query, required: true, schema: {type: string}}
+        - {name: prefix, in: query, schema: {type: string}}
+        - {name: start_after, in: query, schema: {type: string}}
+        - {name: max_keys, in: query, schema: {type: integer, minimum: 1, maximum: 1000, default: 1000}}
+      responses:
+        '200':
+          description: Logical index page
+          content: {application/json: {schema: {$ref: '#/components/schemas/ObjectPage'}}}
+        default: {$ref: '#/components/responses/Error'}
+  /v1/objects/presign:
+    post:
+      operationId: presignObject
+      summary: Resolve a logical object and authorize a direct upstream GET or HEAD
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/ObjectRequest'}}}
+      responses:
+        '200':
+          description: Direct upstream request
+          content: {application/json: {schema: {$ref: '#/components/schemas/ObjectGrant'}}}
+        default: {$ref: '#/components/responses/Error'}
+  /v1/objects/delete:
+    post:
+      operationId: deleteObject
+      summary: Delete an upstream object and its logical index entry
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [bucket, key]
+              properties:
+                bucket: {type: string}
+                key: {type: string}
+      responses:
+        '204': {description: Deleted}
+        default: {$ref: '#/components/responses/Error'}
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema: {type: string, minLength: 1}
+    SessionID:
+      name: id
+      in: path
+      required: true
+      schema: {type: string, pattern: '^du_[a-f0-9]{32}$'}
+  schemas:
+    CreateUpload:
+      type: object
+      additionalProperties: false
+      required: [bucket, key, size]
+      properties:
+        bucket: {type: string}
+        key: {type: string}
+        size: {type: integer, minimum: 0}
+        content_type: {type: string}
+    Session:
+      type: object
+      required: [id, status, logical_key, declared_bytes, expires_at]
+      properties:
+        id: {type: string}
+        status: {type: string, enum: [reserved, url_issued, committed, aborted, expired, failed]}
+        logical_key: {type: string}
+        declared_bytes: {type: integer}
+        expires_at: {type: string, format: date-time}
+    PresignedRequest:
+      type: object
+      required: [method, url, headers, expires_at]
+      properties:
+        method: {type: string, enum: [GET, HEAD, PUT]}
+        url: {type: string, format: uri}
+        headers:
+          type: object
+          additionalProperties:
+            oneOf:
+              - {type: string}
+              - {type: array, items: {type: string}}
+        expires_at: {type: string, format: date-time}
+    UploadGrant:
+      type: object
+      required: [id, status, declared_bytes, expires_at, upload]
+      properties:
+        id: {type: string}
+        status: {type: string}
+        declared_bytes: {type: integer}
+        expires_at: {type: string, format: date-time}
+        upload: {$ref: '#/components/schemas/PresignedRequest'}
+    CompletedPart:
+      type: object
+      additionalProperties: false
+      required: [part_number, etag]
+      properties:
+        part_number: {type: integer, minimum: 1, maximum: 10000}
+        etag: {type: string, minLength: 1}
+    ObjectRequest:
+      type: object
+      additionalProperties: false
+      required: [bucket, key, method]
+      properties:
+        bucket: {type: string}
+        key: {type: string}
+        method: {type: string, enum: [GET, HEAD]}
+        expires_seconds: {type: integer, minimum: 0}
+    ObjectGrant:
+      type: object
+      required: [bucket, key, size_bytes, request]
+      properties:
+        bucket: {type: string}
+        key: {type: string}
+        size_bytes: {type: integer}
+        request: {$ref: '#/components/schemas/PresignedRequest'}
+    IndexedObject:
+      type: object
+      required: [key, size_bytes, updated_at]
+      properties:
+        key: {type: string}
+        size_bytes: {type: integer}
+        updated_at: {type: string, format: date-time}
+    ObjectPage:
+      type: object
+      required: [bucket, prefix, objects, is_truncated, next_start_after]
+      properties:
+        bucket: {type: string}
+        prefix: {type: string}
+        objects: {type: array, items: {$ref: '#/components/schemas/IndexedObject'}}
+        is_truncated: {type: boolean}
+        next_start_after: {type: string}
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: {type: string}
+            message: {type: string}
+  responses:
+    Error:
+      description: Error response
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}

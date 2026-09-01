@@ -88,6 +88,8 @@ jobs:
             deploy/production/.env.example \
             deploy/production/README.md \
             deploy/production/EXTERNAL-S3.md \
+            deploy/production/INDEX-MODE-API.md \
+            deploy/production/index-mode-openapi.yaml \
             deploy/production/R2-ACCOUNT-MANAGEMENT.md \
             "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/"
 

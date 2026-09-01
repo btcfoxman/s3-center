@@ -27,6 +27,7 @@ import (
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	s3types "github.com/aws/aws-sdk-go-v2/service/s3/types"
 	smithymiddleware "github.com/aws/smithy-go/middleware"
 	smithyhttp "github.com/aws/smithy-go/transport/http"
 
@@ -66,18 +67,49 @@ type HeadObjectResult struct {
 	Metadata     map[string]string
 }
 
-// PresignedPut describes the request a client must send directly to a backend.
-type PresignedPut struct {
+// PresignedRequest describes one narrowly-scoped request a client sends
+// directly to an upstream backend. Object bytes never traverse the
+// orchestrator when this capability is used.
+type PresignedRequest struct {
 	URL       string
 	Method    string
 	Headers   http.Header
 	ExpiresAt time.Time
 }
 
+// PresignedPut is retained as an alias for the original direct-upload API.
+type PresignedPut = PresignedRequest
+
 // DirectUploadBackend is an optional capability implemented by S3-compatible
 // backends that can mint a narrowly-scoped PutObject URL.
 type DirectUploadBackend interface {
 	PresignPutObject(ctx context.Context, key, contentType, uploadID string, expires time.Duration) (*PresignedPut, error)
+}
+
+// DirectObjectBackend is the optional index-mode capability used to authorize
+// reads and metadata requests against the physical upstream object. DELETE is
+// deliberately not exposed here: index removal and quota release must remain
+// one controlled operation rather than trusting a client to finalize a
+// presigned delete.
+type DirectObjectBackend interface {
+	PresignGetObject(ctx context.Context, key string, expires time.Duration) (*PresignedRequest, error)
+	PresignHeadObject(ctx context.Context, key string, expires time.Duration) (*PresignedRequest, error)
+}
+
+// CompletedPart is the client-supplied ETag manifest for one native upstream
+// multipart upload.
+type CompletedPart struct {
+	PartNumber int    `json:"part_number"`
+	ETag       string `json:"etag"`
+}
+
+// DirectMultipartBackend keeps part bodies entirely between the client and
+// upstream S3 while the orchestrator owns selection, reservation and commit.
+type DirectMultipartBackend interface {
+	CreateMultipartObject(ctx context.Context, key, contentType, sessionID string) (string, error)
+	PresignUploadPart(ctx context.Context, key, upstreamUploadID string, partNumber int, expires time.Duration) (*PresignedRequest, error)
+	CompleteMultipartObject(ctx context.Context, key, upstreamUploadID string, parts []CompletedPart) (string, error)
+	AbortMultipartObject(ctx context.Context, key, upstreamUploadID string) error
 }
 
 // ObjectBackend defines the interface for object storage operations.
@@ -279,6 +311,103 @@ func (b *S3Backend) PresignPutObject(ctx context.Context, key, contentType, uplo
 		return nil, fmt.Errorf("presign put object: %w", err)
 	}
 	return &PresignedPut{URL: result.URL, Method: result.Method, Headers: result.SignedHeader, ExpiresAt: time.Now().Add(expires).UTC()}, nil
+}
+
+// PresignGetObject returns a time-limited URL for reading the physical object
+// directly from the configured S3-compatible backend.
+func (b *S3Backend) PresignGetObject(ctx context.Context, key string, expires time.Duration) (*PresignedRequest, error) {
+	result, err := s3.NewPresignClient(b.client).PresignGetObject(ctx,
+		&s3.GetObjectInput{Bucket: aws.String(b.bucket), Key: aws.String(key)},
+		func(o *s3.PresignOptions) { o.Expires = expires })
+	if err != nil {
+		return nil, fmt.Errorf("presign get object: %w", err)
+	}
+	return &PresignedRequest{URL: result.URL, Method: result.Method, Headers: result.SignedHeader, ExpiresAt: time.Now().Add(expires).UTC()}, nil
+}
+
+// PresignHeadObject returns a time-limited URL for reading physical object
+// metadata without transferring its body through the orchestrator.
+func (b *S3Backend) PresignHeadObject(ctx context.Context, key string, expires time.Duration) (*PresignedRequest, error) {
+	result, err := s3.NewPresignClient(b.client).PresignHeadObject(ctx,
+		&s3.HeadObjectInput{Bucket: aws.String(b.bucket), Key: aws.String(key)},
+		func(o *s3.PresignOptions) { o.Expires = expires })
+	if err != nil {
+		return nil, fmt.Errorf("presign head object: %w", err)
+	}
+	return &PresignedRequest{URL: result.URL, Method: result.Method, Headers: result.SignedHeader, ExpiresAt: time.Now().Add(expires).UTC()}, nil
+}
+
+// CreateMultipartObject starts a native upstream multipart upload. The session
+// marker survives assembly and lets the control plane verify the final object
+// before committing its logical index entry.
+func (b *S3Backend) CreateMultipartObject(ctx context.Context, key, contentType, sessionID string) (string, error) {
+	input := &s3.CreateMultipartUploadInput{
+		Bucket: aws.String(b.bucket), Key: aws.String(key), Metadata: map[string]string{"upload-id": sessionID},
+	}
+	if contentType != "" {
+		input.ContentType = aws.String(contentType)
+	}
+	result, err := b.client.CreateMultipartUpload(ctx, input)
+	if err != nil {
+		return "", fmt.Errorf("create multipart object: %w", err)
+	}
+	if result.UploadId == nil || *result.UploadId == "" {
+		return "", fmt.Errorf("create multipart object: upstream returned no upload id")
+	}
+	return *result.UploadId, nil
+}
+
+// PresignUploadPart authorizes exactly one part number against an existing
+// upstream multipart upload.
+func (b *S3Backend) PresignUploadPart(ctx context.Context, key, upstreamUploadID string, partNumber int, expires time.Duration) (*PresignedRequest, error) {
+	if partNumber < 1 || partNumber > 10000 {
+		return nil, fmt.Errorf("part number must be between 1 and 10000")
+	}
+	result, err := s3.NewPresignClient(b.client).PresignUploadPart(ctx, &s3.UploadPartInput{
+		Bucket: aws.String(b.bucket), Key: aws.String(key), UploadId: aws.String(upstreamUploadID),
+		PartNumber: aws.Int32(int32(partNumber)), //nolint:gosec // The range check above is narrower than int32.
+	}, func(o *s3.PresignOptions) { o.Expires = expires })
+	if err != nil {
+		return nil, fmt.Errorf("presign upload part: %w", err)
+	}
+	return &PresignedRequest{URL: result.URL, Method: result.Method, Headers: result.SignedHeader, ExpiresAt: time.Now().Add(expires).UTC()}, nil
+}
+
+// CompleteMultipartObject asks the upstream provider to assemble already
+// uploaded parts; no part bytes pass through the orchestrator.
+func (b *S3Backend) CompleteMultipartObject(ctx context.Context, key, upstreamUploadID string, parts []CompletedPart) (string, error) {
+	completed := make([]s3types.CompletedPart, len(parts))
+	for i := range parts {
+		if parts[i].PartNumber < 1 || parts[i].PartNumber > 10000 {
+			return "", fmt.Errorf("part number must be between 1 and 10000")
+		}
+		completed[i] = s3types.CompletedPart{
+			ETag:       aws.String(parts[i].ETag),
+			PartNumber: aws.Int32(int32(parts[i].PartNumber)), //nolint:gosec // Validated against the S3 1..10000 range.
+		}
+	}
+	result, err := b.client.CompleteMultipartUpload(ctx, &s3.CompleteMultipartUploadInput{
+		Bucket: aws.String(b.bucket), Key: aws.String(key), UploadId: aws.String(upstreamUploadID),
+		MultipartUpload: &s3types.CompletedMultipartUpload{Parts: completed},
+	})
+	if err != nil {
+		return "", fmt.Errorf("complete multipart object: %w", err)
+	}
+	if result.ETag == nil {
+		return "", nil
+	}
+	return *result.ETag, nil
+}
+
+// AbortMultipartObject releases an unfinished native upstream upload.
+func (b *S3Backend) AbortMultipartObject(ctx context.Context, key, upstreamUploadID string) error {
+	_, err := b.client.AbortMultipartUpload(ctx, &s3.AbortMultipartUploadInput{
+		Bucket: aws.String(b.bucket), Key: aws.String(key), UploadId: aws.String(upstreamUploadID),
+	})
+	if err != nil {
+		return fmt.Errorf("abort multipart object: %w", err)
+	}
+	return nil
 }
 
 // GetObject retrieves an object from the backend. When rangeHeader is non-empty
