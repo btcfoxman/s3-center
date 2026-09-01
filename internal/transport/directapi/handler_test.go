@@ -34,7 +34,7 @@ func TestTokenAllowsBucketAndPrefix(t *testing.T) {
 
 func TestDecodeRequestRejectsTrailingJSON(t *testing.T) {
 	t.Parallel()
-	req := httptest.NewRequest(http.MethodPost, "/v1/uploads", strings.NewReader(`{"bucket":"assets"} {"bucket":"other"}`))
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/v1/uploads", strings.NewReader(`{"bucket":"assets"} {"bucket":"other"}`))
 	w := httptest.NewRecorder()
 	var value map[string]any
 	if decodeRequest(w, req, &value) {
