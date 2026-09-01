@@ -110,6 +110,25 @@ jobs:
              length=\$(awk -F= '/^DYNAMIC_BACKEND_MASTER_KEY=/{print length(substr(\$0,index(\$0,\"=\")+1)); found=1} END{if (!found) exit 1}' .env); \
              test \"\$length\" -ge 32; echo 'managed-backend encryption key is ready'"
 
+      - name: Sync direct API token
+        shell: bash
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+          DIRECT_UPLOAD_TOKEN: ${{ secrets.DIRECT_UPLOAD_TOKEN }}
+        run: |
+          set -euo pipefail
+          test "${#DIRECT_UPLOAD_TOKEN}" -ge 32
+          token_b64="$(printf '%s' "$DIRECT_UPLOAD_TOKEN" | base64 -w0)"
+          ssh -i ~/.ssh/deploy_key -p "${DEPLOY_PORT:-22}" "$DEPLOY_USER@$DEPLOY_HOST" \
+            "set -eu; cd '$DEPLOY_PATH'; umask 077; \
+             token=\$(printf '%s' '$token_b64' | base64 -d); \
+             tmp=\$(mktemp .env.direct-token.XXXXXX); \
+             awk -v token=\"\$token\" 'BEGIN{found=0} /^DIRECT_UPLOAD_TOKEN=/{print \"DIRECT_UPLOAD_TOKEN=\" token; found=1; next} {print} END{if (!found) print \"DIRECT_UPLOAD_TOKEN=\" token}' .env > \"\$tmp\"; \
+             chmod 600 \"\$tmp\"; mv \"\$tmp\" .env; echo 'direct API token is ready'"
+
       - name: Deploy and verify
         shell: bash
         env:
