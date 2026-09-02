@@ -52,6 +52,14 @@ type CreateRequest struct {
 	WarningPercent  int    `json:"warning_percent"`
 }
 
+// UpdateProxyRequest changes the server-side egress used by every dynamically
+// managed bucket belonging to one Cloudflare account. An empty ProxyURL means
+// direct access.
+type UpdateProxyRequest struct {
+	AccountID string `json:"account_id"`
+	ProxyURL  string `json:"proxy_url"`
+}
+
 // View is safe to return to browsers. Credentials and proxy userinfo are never
 // included.
 type View struct {
@@ -73,6 +81,17 @@ type Store interface {
 	SyncQuotaLimits(ctx context.Context, backends []config.BackendConfig) error
 }
 
+// BucketBackend is an object backend that can verify its configured bucket.
+// Keeping the factory injectable makes account-level proxy replacement
+// testable without contacting Cloudflare.
+type BucketBackend interface {
+	backend.ObjectBackend
+	CheckBucket(ctx context.Context) error
+}
+
+// BackendFactory creates a bucket client from one validated definition.
+type BackendFactory func(ctx context.Context, cfg *config.BackendConfig) (BucketBackend, error)
+
 type Manager struct {
 	enabled               bool
 	cipher                *definitionCipher
@@ -82,10 +101,21 @@ type Manager struct {
 	breakerRegistry       *breaker.Registry
 	maxObjectSize         int64
 	defaultWarningPercent int
+	backendFactory        BackendFactory
 
 	createMu    sync.Mutex
 	mu          sync.RWMutex
 	definitions map[string]*Definition
+}
+
+type proxyReplacement struct {
+	definition        *Definition
+	encrypted         []byte
+	previousEncrypted []byte
+	live              backend.ObjectBackend
+	previousLive      backend.ObjectBackend
+	cb                *backend.CircuitBreakerBackend
+	previousCB        *backend.CircuitBreakerBackend
 }
 
 type ManagerDeps struct {
@@ -94,9 +124,16 @@ type ManagerDeps struct {
 	Runtime         *infra.BackendRuntime
 	BreakerRegistry *breaker.Registry
 	Definitions     []Definition
+	BackendFactory  BackendFactory
 }
 
 func New(deps ManagerDeps) (*Manager, error) {
+	backendFactory := deps.BackendFactory
+	if backendFactory == nil {
+		backendFactory = func(ctx context.Context, cfg *config.BackendConfig) (BucketBackend, error) {
+			return backend.NewS3Backend(ctx, cfg)
+		}
+	}
 	m := &Manager{
 		enabled:               deps.Config.ManagedBackends.Enabled,
 		store:                 deps.Store,
@@ -105,6 +142,7 @@ func New(deps ManagerDeps) (*Manager, error) {
 		breakerRegistry:       deps.BreakerRegistry,
 		maxObjectSize:         deps.Config.Server.MaxObjectSize,
 		defaultWarningPercent: deps.Config.ManagedBackends.DefaultWarningPercent,
+		backendFactory:        backendFactory,
 		definitions:           make(map[string]*Definition, len(deps.Definitions)),
 	}
 	for idx := range deps.Definitions {
@@ -176,13 +214,8 @@ func (m *Manager) Create(ctx context.Context, request *CreateRequest) (View, err
 	}
 	m.mu.RUnlock()
 
-	s3Backend, err := backend.NewS3Backend(ctx, &definition.Backend)
+	live, cbBackend, err := m.probeBackend(ctx, definition)
 	if err != nil {
-		return View{}, err
-	}
-	checkCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-	if err := s3Backend.CheckBucket(checkCtx); err != nil {
 		return View{}, err
 	}
 
@@ -203,14 +236,6 @@ func (m *Manager) Create(ctx context.Context, request *CreateRequest) (View, err
 		return View{}, err
 	}
 
-	var live backend.ObjectBackend = s3Backend
-	var cbBackend *backend.CircuitBreakerBackend
-	if m.breakerConfig.Enabled {
-		cbBackend = backend.NewCircuitBreakerBackend(s3Backend, backend.CircuitBreakerConfig{
-			Name: name, Threshold: m.breakerConfig.FailureThreshold, Timeout: m.breakerConfig.OpenTimeout,
-		})
-		live = cbBackend
-	}
 	limits := core.UsageLimits{
 		APIRequestLimit:  definition.Backend.APIRequestLimit,
 		EgressByteLimit:  definition.Backend.EgressByteLimit,
@@ -229,6 +254,183 @@ func (m *Manager) Create(ctx context.Context, request *CreateRequest) (View, err
 	return viewOf(definition), nil
 }
 
+// UpdateAccountProxy validates a candidate egress against every managed
+// bucket in the account, then persists and hot-swaps all clients as one
+// logical operation. A failed validation leaves the previous proxy untouched.
+func (m *Manager) UpdateAccountProxy(ctx context.Context, request *UpdateProxyRequest) ([]View, error) {
+	if !m.Enabled() {
+		return nil, errors.New("managed backends are disabled")
+	}
+	request.AccountID = strings.ToLower(strings.TrimSpace(request.AccountID))
+	request.ProxyURL = normalizeProxyURL(request.ProxyURL)
+	if !accountIDPattern.MatchString(request.AccountID) {
+		return nil, errors.New("cloudflare account ID must be 32 hexadecimal characters")
+	}
+
+	m.createMu.Lock()
+	defer m.createMu.Unlock()
+
+	targets, err := m.accountProxyTargets(request.AccountID)
+	if err != nil {
+		return nil, err
+	}
+	replacements, err := m.prepareProxyReplacements(ctx, targets, request.ProxyURL)
+	if err != nil {
+		return nil, err
+	}
+	if err := m.persistProxyReplacements(ctx, replacements); err != nil {
+		return nil, err
+	}
+	if err := m.replaceProxyClients(replacements); err != nil {
+		return nil, errors.Join(err, m.restoreStoredProxies(replacements))
+	}
+	return m.commitProxyReplacements(replacements), nil
+}
+
+func (m *Manager) accountProxyTargets(accountID string) ([]Definition, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	targets := make([]Definition, 0)
+	for _, definition := range m.definitions {
+		if definition.Backend.AccountID != accountID {
+			continue
+		}
+		if !definition.Managed {
+			return nil, errors.New("account contains a config-managed backend; update proxy_url in config.yaml")
+		}
+		targets = append(targets, *definition)
+	}
+	if len(targets) == 0 {
+		return nil, errors.New("no dynamically managed backends found for account")
+	}
+	slices.SortFunc(targets, func(a, b Definition) int {
+		return strings.Compare(a.Backend.Name, b.Backend.Name)
+	})
+	return targets, nil
+}
+
+func (m *Manager) prepareProxyReplacements(ctx context.Context, targets []Definition, proxyURL string) ([]proxyReplacement, error) {
+	replacements := make([]proxyReplacement, 0, len(targets))
+	for idx := range targets {
+		previous := targets[idx]
+		updated := previous
+		updated.Backend.ProxyURL = proxyURL
+		if err := config.NormalizeAndValidateBackend(&updated.Backend); err != nil {
+			return nil, err
+		}
+		live, cbBackend, err := m.probeBackend(ctx, &updated)
+		if err != nil {
+			return nil, fmt.Errorf("validate backend %q through candidate proxy: %w", updated.Backend.Name, err)
+		}
+		previousLive, err := m.runtime.GetBackend(updated.Backend.Name)
+		if err != nil {
+			return nil, err
+		}
+		encrypted, err := m.cipher.seal(updated.Backend.Name, &updated)
+		if err != nil {
+			return nil, err
+		}
+		previousEncrypted, err := m.cipher.seal(previous.Backend.Name, &previous)
+		if err != nil {
+			return nil, err
+		}
+		previousCB, _ := previousLive.(*backend.CircuitBreakerBackend)
+		replacements = append(replacements, proxyReplacement{
+			definition: &updated, encrypted: encrypted, previousEncrypted: previousEncrypted,
+			live: live, previousLive: previousLive, cb: cbBackend, previousCB: previousCB,
+		})
+	}
+	return replacements, nil
+}
+
+func (m *Manager) persistProxyReplacements(ctx context.Context, replacements []proxyReplacement) error {
+	persisted := 0
+	for idx := range replacements {
+		item := &replacements[idx]
+		if err := m.store.UpsertManagedBackend(ctx, item.definition.Backend.Name, item.encrypted); err != nil {
+			return errors.Join(err, m.restoreStoredProxies(replacements[:persisted]))
+		}
+		persisted++
+	}
+	return nil
+}
+
+func (m *Manager) replaceProxyClients(replacements []proxyReplacement) error {
+	replaced := 0
+	for idx := range replacements {
+		item := &replacements[idx]
+		if _, err := m.runtime.ReplaceBackend(item.definition.Backend.Name, item.live); err != nil {
+			for rollbackIdx := replaced - 1; rollbackIdx >= 0; rollbackIdx-- {
+				rollback := &replacements[rollbackIdx]
+				_, _ = m.runtime.ReplaceBackend(rollback.definition.Backend.Name, rollback.previousLive)
+			}
+			return err
+		}
+		replaced++
+	}
+	return nil
+}
+
+func (m *Manager) commitProxyReplacements(replacements []proxyReplacement) []View {
+	m.mu.Lock()
+	for idx := range replacements {
+		item := &replacements[idx]
+		m.definitions[item.definition.Backend.Name] = item.definition
+	}
+	m.mu.Unlock()
+
+	views := make([]View, 0, len(replacements))
+	for idx := range replacements {
+		item := &replacements[idx]
+		if m.breakerRegistry != nil {
+			m.breakerRegistry.Unregister(item.previousCB)
+			m.breakerRegistry.Register(item.cb)
+		}
+		views = append(views, viewOf(item.definition))
+	}
+	return views
+}
+
+func (m *Manager) restoreStoredProxies(replacements []proxyReplacement) error {
+	restoreCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	var restoreErr error
+	for idx := range replacements {
+		item := &replacements[idx]
+		if err := m.store.UpsertManagedBackend(restoreCtx, item.definition.Backend.Name, item.previousEncrypted); err != nil {
+			restoreErr = errors.Join(restoreErr, fmt.Errorf("restore backend %q: %w", item.definition.Backend.Name, err))
+		}
+	}
+	return restoreErr
+}
+
+func (m *Manager) probeBackend(ctx context.Context, definition *Definition) (backend.ObjectBackend, *backend.CircuitBreakerBackend, error) {
+	candidate, err := m.backendFactory(ctx, &definition.Backend)
+	if err != nil {
+		return nil, nil, err
+	}
+	checkCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	if err := candidate.CheckBucket(checkCtx); err != nil {
+		return nil, nil, err
+	}
+	if !m.breakerConfig.Enabled {
+		return candidate, nil, nil
+	}
+	cbBackend := backend.NewCircuitBreakerBackend(candidate, backend.CircuitBreakerConfig{
+		Name: definition.Backend.Name, Threshold: m.breakerConfig.FailureThreshold, Timeout: m.breakerConfig.OpenTimeout,
+	})
+	return cbBackend, cbBackend, nil
+}
+
+func normalizeProxyURL(raw string) string {
+	proxyURL := strings.TrimSpace(raw)
+	if proxyURL != "" && !strings.Contains(proxyURL, "://") {
+		proxyURL = "http://" + proxyURL
+	}
+	return proxyURL
+}
+
 func buildDefinition(request *CreateRequest, maxObjectSize int64, defaultWarningPercent int) (*Definition, error) {
 	request.Name = strings.TrimSpace(request.Name)
 	request.AccountLabel = strings.TrimSpace(request.AccountLabel)
@@ -236,7 +438,7 @@ func buildDefinition(request *CreateRequest, maxObjectSize int64, defaultWarning
 	request.Bucket = strings.TrimSpace(request.Bucket)
 	request.AccessKeyID = strings.TrimSpace(request.AccessKeyID)
 	request.SecretAccessKey = strings.TrimSpace(request.SecretAccessKey)
-	request.ProxyURL = strings.TrimSpace(request.ProxyURL)
+	request.ProxyURL = normalizeProxyURL(request.ProxyURL)
 	if !backendNamePattern.MatchString(request.Name) {
 		return nil, errors.New("backend name must be 1-63 letters, numbers, dots, underscores, or hyphens")
 	}
@@ -251,9 +453,6 @@ func buildDefinition(request *CreateRequest, maxObjectSize int64, defaultWarning
 	}
 	if request.AccessKeyID == "" || request.SecretAccessKey == "" {
 		return nil, errors.New("R2 access key ID and secret access key are required")
-	}
-	if request.ProxyURL != "" && !strings.Contains(request.ProxyURL, "://") {
-		request.ProxyURL = "http://" + request.ProxyURL
 	}
 	warning := request.WarningPercent
 	if warning == 0 {

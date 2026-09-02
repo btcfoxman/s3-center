@@ -89,6 +89,21 @@ func (r *backendRegistry) Add(name string, be backend.ObjectBackend) error {
 	return nil
 }
 
+// Replace swaps one live backend client without changing its routing order.
+// Existing in-flight operations may finish on the old client; subsequent
+// lookups observe the replacement. This is used when an account-scoped proxy
+// is updated at runtime.
+func (r *backendRegistry) Replace(name string, be backend.ObjectBackend) (backend.ObjectBackend, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	old, exists := r.backends[name]
+	if !exists {
+		return nil, fmt.Errorf("backend %s not found", name)
+	}
+	r.backends[name] = be
+	return old, nil
+}
+
 // IsDraining returns true if the named backend is currently being
 // drained. Returns false when no drain manager is set (e.g. early
 // startup before SetDrainChecker).

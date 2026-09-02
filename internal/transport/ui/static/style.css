@@ -400,6 +400,10 @@ section > h2 { margin-bottom: 1.25rem; }
 .cf-account-metrics strong { display: block; overflow: hidden; margin-top: .15rem; color: var(--text-soft); font-family: var(--mono); font-size: .68rem; text-overflow: ellipsis; white-space: nowrap; }
 .cf-account-foot { display: flex; flex-wrap: wrap; gap: .4rem .8rem; margin-top: .85rem; color: var(--muted); font-family: var(--mono); font-size: .58rem; }
 .cf-managed { color: var(--mint) !important; }
+.cf-account-controls { display: flex; align-items: center; gap: .45rem; margin-top: .9rem; padding-top: .8rem; border-top: 1px solid rgba(173, 226, 205, .09); }
+.cf-card-action { display: inline-flex; min-height: 30px; align-items: center; padding: 0 .62rem; border: 1px solid rgba(114, 230, 180, .2); border-radius: 8px; background: rgba(19, 48, 39, .38); color: var(--mint); font-family: var(--mono); font-size: .6rem; text-decoration: none; cursor: pointer; transition: border-color .18s, background .18s, transform .18s; }
+.cf-card-action:hover { border-color: rgba(114, 230, 180, .55); background: rgba(38, 91, 72, .34); transform: translateY(-1px); }
+.cf-card-static { margin-left: auto; color: var(--muted); font-family: var(--mono); font-size: .57rem; }
 .cf-account-empty { grid-column: 1 / -1; padding: 2rem; border: 1px dashed var(--line-strong); border-radius: 15px; color: var(--muted); text-align: center; }
 .cf-account-note { margin-top: .9rem; color: var(--muted); font-size: .67rem; line-height: 1.7; }
 .section-heading-actions { align-items: center; }
@@ -431,6 +435,7 @@ td.key { color: var(--mint); font-family: var(--mono); font-size: .72rem; word-b
 .row-degraded { background: rgba(246, 200, 108, .07); }
 
 /* Object browser */
+.objects-section { scroll-margin-top: 7rem; }
 .upload-bar { display: flex; align-items: center; gap: .7rem; }
 .btn-upload { min-height: 39px; border-color: var(--mint); background: var(--mint); color: #07110e; font-weight: 750; }
 .btn-upload:hover { background: var(--mint-bright); box-shadow: 0 10px 26px rgba(114, 230, 180, .14); transform: translateY(-1px); }
@@ -438,6 +443,8 @@ td.key { color: var(--mint); font-family: var(--mono); font-size: .72rem; word-b
 #upload-status { max-width: 250px; font-size: .72rem; }
 .upload-success { color: var(--mint); }
 .upload-error { color: var(--danger); }
+.object-api-note { display: flex; align-items: center; gap: .7rem; margin-bottom: .75rem; padding: .65rem .8rem; border: 1px solid rgba(114, 230, 180, .13); border-radius: 10px; background: rgba(19, 52, 41, .2); color: var(--muted); font-size: .67rem; line-height: 1.55; }
+.object-api-note b { flex-shrink: 0; color: var(--mint); font-family: var(--mono); font-size: .6rem; letter-spacing: .06em; text-transform: uppercase; }
 .object-tree, .empty { overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius-md); background: rgba(6, 15, 13, .42); }
 .object-tree { padding: .4rem; }
 .empty { padding: 1.5rem; color: var(--muted); font-size: .82rem; text-align: center; }
@@ -454,10 +461,11 @@ td.key { color: var(--mint); font-family: var(--mono); font-size: .72rem; word-b
 .tree-meta { margin-left: auto; color: var(--muted); font-family: var(--mono); font-size: .62rem; white-space: nowrap; }
 .tree-loading, .tree-load-more { padding: .55rem 1rem .55rem 2.85rem; color: var(--muted); font-size: .72rem; }
 .tree-load-more { color: var(--mint); cursor: pointer; }
-.tree-action { flex-shrink: 0; padding: .3rem .45rem; border-radius: 8px; color: var(--muted); cursor: pointer; font-size: .7rem; opacity: 0; transition: opacity .15s, color .15s, background .15s; }
+.tree-action { min-height: 27px; flex-shrink: 0; padding: .25rem .5rem; border: 1px solid transparent; border-radius: 8px; background: transparent; color: var(--muted); cursor: pointer; font-family: var(--mono); font-size: .58rem; opacity: .62; transition: opacity .15s, color .15s, background .15s, border-color .15s; }
 .tree-file:hover .tree-action, .tree-dir > summary:hover .tree-action { opacity: 1; }
+.tree-action:focus-visible { border-color: currentColor; outline: 2px solid rgba(114, 230, 180, .24); opacity: 1; }
 .tree-download:hover { background: rgba(93, 158, 224, .12); color: #8bc6ff; }
-.tree-delete:hover { background: rgba(255, 111, 114, .1); color: var(--danger); }
+.tree-delete:hover { border-color: rgba(255, 111, 114, .22); background: rgba(255, 111, 114, .1); color: var(--danger); }
 
 /* Logs */
 .logs-level-select { min-height: 31px; padding: 0 .65rem; border: 1px solid var(--line-strong); border-radius: 9px; background: var(--panel-raised); color: var(--text-soft); font-family: var(--mono); font-size: .62rem; }
@@ -489,6 +497,7 @@ dialog::backdrop { background: rgba(0, 7, 6, .78); backdrop-filter: blur(7px); }
 dialog#confirm-delete { max-width: 390px; }
 dialog#sync-dialog { max-width: 400px; }
 .account-dialog { width: min(calc(100% - 2rem), 760px); }
+.proxy-dialog { width: min(calc(100% - 2rem), 620px); }
 .dialog-heading h2 { margin-top: .25rem; font-size: 1.45rem; font-weight: 560; letter-spacing: -.035em; }
 .dialog-heading p { margin-top: .35rem; color: var(--muted); font-size: .75rem; }
 .account-form-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: .75rem; margin-top: 1.15rem; }
@@ -507,6 +516,24 @@ dialog#sync-dialog { max-width: 400px; }
 .account-add-status.checking { color: var(--amber); }
 .account-add-status.success { color: var(--mint); }
 .account-add-status.error { color: var(--danger); }
+.proxy-current { display: grid; grid-template-columns: auto 1fr; gap: .35rem .75rem; margin-top: 1rem; padding: .75rem .85rem; border: 1px solid var(--line); border-radius: 11px; background: rgba(4, 13, 11, .42); }
+.proxy-current span { color: var(--muted); font-family: var(--mono); font-size: .6rem; text-transform: uppercase; }
+.proxy-current strong, .proxy-current code { overflow-wrap: anywhere; color: var(--text-soft); font-family: var(--mono); font-size: .68rem; }
+.proxy-input-label { display: block; margin-top: .9rem; color: var(--text-soft); font-family: var(--mono); font-size: .63rem; font-weight: 650; }
+.proxy-input-label input { width: 100%; min-height: 43px; margin-top: .35rem; padding: 0 .75rem; border: 1px solid var(--line-strong); border-radius: 11px; background: rgba(20, 39, 36, .78); color: var(--text); font-family: var(--mono); font-size: .75rem; }
+.proxy-input-label input:focus { border-color: rgba(114, 230, 180, .7); outline: 0; box-shadow: 0 0 0 4px rgba(114, 230, 180, .08); }
+.proxy-input-label small { display: block; margin-top: .35rem; color: var(--muted); font-family: var(--sans); font-size: .64rem; font-weight: 400; }
+.delete-dialog-heading h2 { margin-top: .3rem; font-size: 1.35rem; font-weight: 580; letter-spacing: -.035em; }
+.delete-dialog-heading p { margin-top: .35rem; color: var(--muted); font-size: .72rem; line-height: 1.55; }
+.delete-dialog > code { display: block; max-height: 110px; overflow: auto; margin-top: .9rem; padding: .7rem .75rem; border: 1px solid rgba(255, 111, 114, .18); border-radius: 9px; background: rgba(39, 13, 15, .35); color: #ffb9bb; font-family: var(--mono); font-size: .68rem; overflow-wrap: anywhere; white-space: normal; }
+.delete-confirm-phrase { display: block; margin-top: .8rem; color: var(--text-soft); font-size: .68rem; }
+.delete-confirm-phrase[hidden] { display: none; }
+.delete-confirm-phrase input { width: 100%; min-height: 40px; margin-top: .35rem; padding: 0 .7rem; border: 1px solid rgba(255, 111, 114, .32); border-radius: 9px; background: rgba(24, 11, 12, .68); color: var(--text); font-family: var(--mono); }
+.delete-confirm-phrase input:focus { border-color: var(--danger); outline: 0; box-shadow: 0 0 0 4px rgba(255, 111, 114, .08); }
+.delete-status { min-height: 1.1rem; margin-top: .65rem; color: var(--muted); font-size: .68rem; }
+.delete-status.checking { color: var(--amber); }
+.delete-status.success { color: var(--mint); }
+.delete-status.error { color: var(--danger); }
 .dialog-actions .btn-primary { border-color: var(--mint) !important; background: var(--mint) !important; color: #06110e !important; font-weight: 750; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: .55rem; margin-top: 1.25rem; }
 .dialog-actions button { min-height: 38px; padding: 0 1rem; border: 1px solid var(--line-strong); border-radius: 10px; background: var(--panel-raised); color: var(--text-soft); cursor: pointer; font-size: .76rem; }

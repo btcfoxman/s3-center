@@ -52,6 +52,8 @@ func TestCloudflareUsage_GroupsBucketsByAccountAndRaisesWarning(t *testing.T) {
 	assert.InDelta(t, 85, account.StoragePercent, 0.001)
 	assert.Equal(t, "warning", account.State)
 	assert.Equal(t, "混合出口", account.Proxy)
+	assert.True(t, account.ProxyEditable)
+	assert.Equal(t, accountID, account.AccountID)
 }
 
 func TestCloudflareUsage_MarksFreeTierOverflowCritical(t *testing.T) {
@@ -68,4 +70,16 @@ func TestCloudflareUsage_MarksFreeTierOverflowCritical(t *testing.T) {
 	require.Len(t, accounts, 1)
 	assert.Equal(t, "critical", accounts[0].State)
 	assert.Zero(t, accounts[0].FreeRemainingBytes)
+}
+
+func TestCloudflareUsage_DisablesProxyEditingWhenAccountContainsStaticBackend(t *testing.T) {
+	const accountID = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	accounts := cloudflareUsage([]backendmanage.View{
+		{Name: "managed", Provider: "cloudflare_r2", AccountID: accountID, Managed: true},
+		{Name: "static", Provider: "cloudflare_r2", AccountID: accountID, Managed: false},
+	}, &dashboard.Data{QuotaStats: map[string]core.QuotaStat{}, UsageStats: map[string]core.UsageStat{}})
+
+	require.Len(t, accounts, 1)
+	assert.True(t, accounts[0].Managed)
+	assert.False(t, accounts[0].ProxyEditable)
 }

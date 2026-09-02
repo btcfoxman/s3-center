@@ -641,6 +641,12 @@ func TestDashboard_Returns200HTML(t *testing.T) {
 	if !strings.Contains(string(body), "S3 Center") {
 		t.Error("response body missing expected title")
 	}
+	if !strings.Contains(string(body), `id="proxy-dialog"`) {
+		t.Error("response body missing account proxy dialog")
+	}
+	if !strings.Contains(string(body), `id="object-browser"`) || !strings.Contains(string(body), `id="confirm-delete-phrase"`) {
+		t.Error("response body missing upstream object deletion controls")
+	}
 	if !strings.Contains(string(body), "存储概览") {
 		t.Error("response body missing Storage Summary section")
 	}

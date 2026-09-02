@@ -49,6 +49,7 @@ type dashboardPage struct {
 
 type cloudflareAccountUsage struct {
 	Label              string
+	AccountID          string
 	AccountIDShort     string
 	QuotaGroup         string
 	Backends           []string
@@ -65,6 +66,7 @@ type cloudflareAccountUsage struct {
 	StoragePercent     float64
 	State              string
 	Managed            bool
+	ProxyEditable      bool
 }
 
 func cloudflareUsage(views []backendmanage.View, data *dashboard.Data) []cloudflareAccountUsage {
@@ -94,6 +96,7 @@ func mergeCloudflareUsage(groups map[string]*cloudflareAccountUsage, view *backe
 		account.Proxy = "混合出口"
 	}
 	account.Managed = account.Managed || view.Managed
+	account.ProxyEditable = account.ProxyEditable && view.Managed
 	account.Backends = append(account.Backends, view.Name)
 	account.Buckets = append(account.Buckets, view.Bucket)
 	stat := data.QuotaStats[view.Name]
@@ -122,9 +125,9 @@ func newCloudflareAccountUsage(view *backendmanage.View, key string) *cloudflare
 		shortID = shortID[:6] + "…" + shortID[len(shortID)-6:]
 	}
 	return &cloudflareAccountUsage{
-		Label: label, AccountIDShort: shortID, QuotaGroup: key, Proxy: view.Proxy,
+		Label: label, AccountID: view.AccountID, AccountIDShort: shortID, QuotaGroup: key, Proxy: view.Proxy,
 		FreeTierBytes: view.FreeTierBytes, AdmissibleBytes: view.AdmissibleBytes,
-		WarningPercent: view.WarningPercent, Managed: view.Managed,
+		WarningPercent: view.WarningPercent, Managed: view.Managed, ProxyEditable: view.Managed,
 	}
 }
 

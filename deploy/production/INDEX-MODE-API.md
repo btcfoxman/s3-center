@@ -289,6 +289,18 @@ Content-Type: application/json
 
 成功返回 `204`。S3 Center 协调删除实际上游对象和逻辑索引；删除没有对象响应体，因此仍属于控制平面操作。
 
+### 6.3 管理员按目录删除
+
+第三方 Bearer Token 只能按对象删除，避免一个业务调用误删整棵目录。管理员可以在管理端对象浏览器选择 **删除目录**，或使用 Admin API：
+
+```bash
+curl -X DELETE \
+  -H "X-Admin-Token: $ADMIN_API_TOKEN" \
+  "https://s3-api.aiid.qzz.io/admin/api/objects?prefix=assets/partners/acme/2026/"
+```
+
+目录删除以逻辑 Key 前缀为范围。S3 Center 从索引定位每个对象的实际 R2/S3 和物理 Key，通过各账号配置的代理调用上游删除 API，并同步释放索引额度；临时失败的物理副本会进入 Cleanup Queue 重试。文件内容不会先下载到 S3 Center。
+
 ## 7. 服务端调用示例
 
 ### JavaScript / TypeScript

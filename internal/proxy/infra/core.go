@@ -184,6 +184,13 @@ func (c *BackendRuntime) AddBackend(name string, be backend.ObjectBackend, maxOb
 	return nil
 }
 
+// ReplaceBackend atomically swaps an existing backend client while preserving
+// its routing position and quota policy. It returns the previous client so a
+// multi-backend account update can roll back safely.
+func (c *BackendRuntime) ReplaceBackend(name string, be backend.ObjectBackend) (backend.ObjectBackend, error) {
+	return c.registry.Replace(name, be)
+}
+
 // IsDraining returns true if the named backend is currently being drained.
 // Returns false when no drain manager is wired.
 func (c *BackendRuntime) IsDraining(name string) bool {

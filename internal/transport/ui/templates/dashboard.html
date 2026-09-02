@@ -122,6 +122,14 @@
           <span>{{len .Backends}} backend · {{range $i, $b := .Buckets}}{{if $i}}, {{end}}{{$b}}{{end}}</span>
           {{if .Managed}}<span class="cf-managed">动态托管</span>{{end}}
         </div>
+        <div class="cf-account-controls">
+          <a class="cf-card-action" href="#object-browser">管理存储内容</a>
+          {{if .ProxyEditable}}
+          <button type="button" class="cf-card-action cf-proxy-edit" data-account-id="{{.AccountID}}" data-account-label="{{.Label}}" data-current-proxy="{{.Proxy}}">设置 API 代理</button>
+          {{else}}
+          <span class="cf-card-static" title="静态账号请修改 config.yaml 中的 proxy_url 并重新部署">代理由 YAML 管理</span>
+          {{end}}
+        </div>
       </article>
       {{else}}
       <div class="cf-account-empty">尚未识别到 Cloudflare R2 账号。可接入已授权的 R2 Bucket，系统会先验证再加入调度。</div>
@@ -315,12 +323,12 @@
   </section>
 
   <!-- Objects -->
-  <section class="objects-section">
+  <section class="objects-section" id="object-browser">
     <div class="section-heading section-heading-actions">
       <div>
         <span class="section-index">05 · OBJECT BROWSER</span>
         <h2>对象浏览器</h2>
-        <p>浏览、上传与维护虚拟存储桶中的对象</p>
+        <p>按索引浏览存储内容；删除文件或目录时直接调用对象所在 R2/S3 的 API</p>
       </div>
       <div class="upload-bar">
         {{if .IndexOnly}}
@@ -331,6 +339,7 @@
         {{end}}
       </div>
     </div>
+    <div class="object-api-note"><b>上游删除</b><span>目录删除会逐项定位实际存储账号，并通过该账号配置的代理调用上游 DELETE API；失败项进入清理队列继续重试。</span></div>
     <input type="file" id="upload-files-input" aria-label="Upload files" multiple hidden>
     <input type="file" id="upload-folder-input" aria-label="Upload folder" webkitdirectory hidden>
     {{if .Data.TopLevelEntries.Entries}}
@@ -341,7 +350,7 @@
           <summary>
             <span class="tree-name">{{.Name}}</span>
             <span class="tree-meta">{{.FileCount}} files &middot; {{formatBytes .TotalSize}}</span>
-            <span class="tree-action tree-delete" title="Delete">&#x2715;</span>
+            <button type="button" class="tree-action tree-delete" title="删除整个目录" aria-label="删除目录 {{.Name}}">删除目录</button>
           </summary>
           <div class="tree-children">
             <div class="tree-loading">Loading&hellip;</div>
@@ -351,7 +360,7 @@
         <div class="tree-file" data-key="{{.Name}}">
           <span class="tree-name">{{.Name}}</span>
           <span class="tree-meta">{{joinStrings .Backends ", "}} &middot; {{formatBytes .TotalSize}} &middot; {{.CreatedAt}}</span>
-          <span class="tree-action tree-delete" title="Delete">&#x2715;</span>
+          <button type="button" class="tree-action tree-delete" title="删除对象" aria-label="删除对象 {{.Name}}">删除</button>
         </div>
         {{end}}
       {{end}}
@@ -458,12 +467,43 @@
 
 </div>
 
-<dialog id="confirm-delete">
-  <p>Delete <strong id="confirm-delete-name"></strong>?</p>
-  <div class="dialog-actions">
-    <button id="confirm-delete-cancel">Cancel</button>
-    <button id="confirm-delete-ok" class="btn-danger">Delete</button>
+<dialog id="confirm-delete" class="delete-dialog">
+  <div class="delete-dialog-heading">
+    <span class="section-index">UPSTREAM DELETE</span>
+    <h2 id="confirm-delete-title">确认删除对象</h2>
+    <p id="confirm-delete-impact">系统将调用实际 R2/S3 的删除 API，此操作不可撤销。</p>
   </div>
+  <code id="confirm-delete-name"></code>
+  <label id="confirm-delete-phrase-wrap" class="delete-confirm-phrase" hidden>请输入 <b>DELETE</b> 确认删除整个目录
+    <input id="confirm-delete-phrase" type="text" spellcheck="false" autocomplete="off" placeholder="DELETE">
+  </label>
+  <p id="confirm-delete-status" class="delete-status" role="status"></p>
+  <div class="dialog-actions">
+    <button id="confirm-delete-cancel" type="button">取消</button>
+    <button id="confirm-delete-ok" type="button" class="btn-danger">确认删除</button>
+  </div>
+</dialog>
+
+<dialog id="proxy-dialog" class="proxy-dialog">
+  <form id="proxy-form" autocomplete="off">
+    <div class="dialog-heading">
+      <span class="section-index">ACCOUNT EGRESS</span>
+      <h2>设置 Cloudflare R2 API 代理</h2>
+      <p>一次更新该账号下全部动态托管 Bucket；系统会先经由新出口逐个验证，再热切换连接。</p>
+    </div>
+    <input id="proxy-account-id" name="account_id" type="hidden">
+    <div class="proxy-current"><span>账号</span><strong id="proxy-account-label"></strong><span>当前出口</span><code id="proxy-current-value"></code></div>
+    <label class="proxy-input-label">新代理地址
+      <input id="proxy-url" name="proxy_url" type="text" spellcheck="false" placeholder="http://user:pass@203.0.113.10:8080">
+      <small>支持 HTTP、HTTPS、SOCKS5、SOCKS5H；不写协议时按 HTTP。留空并提交将恢复服务器直连。</small>
+    </label>
+    <div class="account-security-note"><b>不会影响文件直传</b><span>代理用于 S3 Center 发起的 Head/List/Delete、Multipart 控制等 R2 API；预签名 PUT/GET 的文件流量仍由调用方直连 R2。</span></div>
+    <p id="proxy-status" class="account-add-status" role="status"></p>
+    <div class="dialog-actions">
+      <button id="proxy-cancel" type="button">取消</button>
+      <button id="proxy-submit" type="submit" class="btn-primary">验证并应用</button>
+    </div>
+  </form>
 </dialog>
 
 <dialog id="account-dialog" class="account-dialog">

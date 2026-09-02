@@ -58,10 +58,12 @@
       let metaSpan = document.createElement('span');
       metaSpan.className = 'tree-meta';
       metaSpan.textContent = entry.fileCount + ' files \u00B7 ' + formatBytes(entry.totalSize);
-      let delSpan = document.createElement('span');
+      let delSpan = document.createElement('button');
+      delSpan.type = 'button';
       delSpan.className = 'tree-action tree-delete';
-      delSpan.title = 'Delete';
-      delSpan.textContent = '\u2715';
+      delSpan.title = '删除整个目录';
+      delSpan.setAttribute('aria-label', '删除目录 ' + entry.name);
+      delSpan.textContent = '删除目录';
       summary.appendChild(nameSpan);
       summary.appendChild(metaSpan);
       summary.appendChild(delSpan);
@@ -92,10 +94,12 @@
     fDlSpan.className = 'tree-action tree-download';
     fDlSpan.title = 'Download';
     fDlSpan.textContent = '\u2193';
-    let fDelSpan = document.createElement('span');
+    let fDelSpan = document.createElement('button');
+    fDelSpan.type = 'button';
     fDelSpan.className = 'tree-action tree-delete';
-    fDelSpan.title = 'Delete';
-    fDelSpan.textContent = '\u2715';
+    fDelSpan.title = '删除对象';
+    fDelSpan.setAttribute('aria-label', '删除对象 ' + entry.name);
+    fDelSpan.textContent = '删除';
     div.appendChild(fNameSpan);
     div.appendChild(fMetaSpan);
     if (!indexOnly) div.appendChild(fDlSpan);
@@ -161,6 +165,11 @@
   // --- Delete confirmation flow ---
   let dialog = document.getElementById('confirm-delete');
   let deleteNameEl = document.getElementById('confirm-delete-name');
+  let deleteTitleEl = document.getElementById('confirm-delete-title');
+  let deleteImpactEl = document.getElementById('confirm-delete-impact');
+  let deletePhraseWrap = document.getElementById('confirm-delete-phrase-wrap');
+  let deletePhrase = document.getElementById('confirm-delete-phrase');
+  let deleteStatus = document.getElementById('confirm-delete-status');
   let deleteCancelBtn = document.getElementById('confirm-delete-cancel');
   let deleteOkBtn = document.getElementById('confirm-delete-ok');
   let pendingDeleteKey = '';
@@ -177,7 +186,9 @@
       if (fileEl?.dataset.key) {
         pendingDeleteKey = fileEl.dataset.key;
         pendingDeleteIsDir = false;
-        deleteNameEl.textContent = pendingDeleteKey.split('/').pop();
+        deleteNameEl.textContent = pendingDeleteKey;
+        deleteTitleEl.textContent = '确认删除对象';
+        deleteImpactEl.textContent = '系统将通过对应账号的代理调用实际 R2/S3 删除 API，此操作不可撤销。';
       } else if (dirEl?.dataset.prefix) {
         e.preventDefault();
         pendingDeleteKey = dirEl.dataset.prefix;
@@ -185,13 +196,24 @@
         let metaEl = dirEl.querySelector('summary .tree-meta');
         let metaText = metaEl ? ' (' + metaEl.textContent.trim() + ')' : '';
         deleteNameEl.textContent = pendingDeleteKey + metaText;
+        deleteTitleEl.textContent = '确认删除整个目录';
+        deleteImpactEl.textContent = '目录内所有索引对象及其上游副本都会被逐项删除；失败项将进入清理队列重试。';
       } else {
         return;
       }
 
-      deleteOkBtn.disabled = false;
-      deleteOkBtn.textContent = 'Delete';
+      deletePhraseWrap.hidden = !pendingDeleteIsDir;
+      deletePhrase.value = '';
+      deleteStatus.textContent = '';
+      deleteStatus.className = 'delete-status';
+      deleteOkBtn.disabled = pendingDeleteIsDir;
+      deleteOkBtn.textContent = pendingDeleteIsDir ? '确认删除目录' : '确认删除';
       dialog.showModal();
+      if (pendingDeleteIsDir) deletePhrase.focus();
+    });
+
+    deletePhrase.addEventListener('input', function () {
+      if (pendingDeleteIsDir) deleteOkBtn.disabled = deletePhrase.value.trim() !== 'DELETE';
     });
 
     deleteCancelBtn.addEventListener('click', function () {
@@ -200,7 +222,9 @@
 
     deleteOkBtn.addEventListener('click', function () {
       deleteOkBtn.disabled = true;
-      deleteOkBtn.textContent = 'Deleting\u2026';
+      deleteOkBtn.textContent = '正在调用上游 API…';
+      deleteStatus.className = 'delete-status checking';
+      deleteStatus.textContent = pendingDeleteIsDir ? '正在逐项删除目录内容，请勿关闭页面。' : '正在删除上游对象。';
 
       let endpoint = pendingDeleteIsDir ? 'api/delete-prefix' : 'api/delete';
       let payload = pendingDeleteIsDir
@@ -211,7 +235,7 @@
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: payload
-      }, 30000)
+      }, pendingDeleteIsDir ? 600000 : 30000)
         .then(function (resp) {
           if (resp.status === 401) { location.href = 'login'; return; }
           return resp.json();
@@ -219,14 +243,21 @@
         .then(function (data) {
           if (!data) return;
           if (data.ok) {
-            dialog.close();
-            location.reload();
+            let count = typeof data.deleted === 'number' ? data.deleted : 1;
+            deleteStatus.className = 'delete-status success';
+            deleteStatus.textContent = '上游删除已受理，共处理 ' + count + ' 个对象。';
+            deleteOkBtn.textContent = '删除完成';
+            setTimeout(function () { location.reload(); }, 900);
           } else {
             deleteOkBtn.textContent = data.error || 'Failed';
+            deleteStatus.className = 'delete-status error';
+            deleteStatus.textContent = data.error || '删除失败，请检查清理队列。';
           }
         })
         .catch(function (err) {
-          deleteOkBtn.textContent = err.name === 'AbortError' ? 'Request timed out' : 'Network error';
+          deleteOkBtn.textContent = err.name === 'AbortError' ? '请求超时' : '网络错误';
+          deleteStatus.className = 'delete-status error';
+          deleteStatus.textContent = '请求未完成，请刷新索引并检查清理队列后再重试。';
         });
     });
   }

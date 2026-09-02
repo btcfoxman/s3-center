@@ -62,6 +62,28 @@ func TestBackendRegistry_GetAndAllAndOrder(t *testing.T) {
 	}
 }
 
+func TestBackendRegistryReplacePreservesOrderAndReturnsPrevious(t *testing.T) {
+	t.Parallel()
+	old := &stubBackend{}
+	replacement := &stubBackend{}
+	r := newBackendRegistry(map[string]backend.ObjectBackend{"b1": old}, []string{"b1"})
+
+	previous, err := r.Replace("b1", replacement)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if previous != old {
+		t.Fatal("Replace did not return the previous backend")
+	}
+	got, _ := r.Get("b1")
+	if got != replacement || len(r.Order()) != 1 || r.Order()[0] != "b1" {
+		t.Fatalf("replacement changed registry shape: backend=%v order=%v", got, r.Order())
+	}
+	if _, err := r.Replace("missing", replacement); err == nil {
+		t.Fatal("expected missing backend replacement to fail")
+	}
+}
+
 func TestBackendRegistry_ExcludeDraining_NoCheckerWiredKeepsAll(t *testing.T) {
 	t.Parallel()
 	r := newBackendRegistry(nil, []string{"a", "b"})

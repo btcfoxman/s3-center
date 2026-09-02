@@ -53,6 +53,8 @@ var uiAPIRoutes = []uiAPIRoute{
 	{"/api/dashboard", func(h *Handler) http.HandlerFunc { return h.handleAPIDashboard }, quotaTrackingNone, ""},
 	{"/api/r2-accounts", func(h *Handler) http.HandlerFunc { return h.handleAPIR2Accounts }, quotaTrackingTracked,
 		"one-time HeadBucket validates the candidate before registration; it is intentionally outside operational counters"},
+	{"/api/r2-account-proxy", func(h *Handler) http.HandlerFunc { return h.handleAPIR2AccountProxy }, quotaTrackingTracked,
+		"HeadBucket validates every account bucket through the candidate proxy before the clients are replaced"},
 	{"/api/tree", func(h *Handler) http.HandlerFunc { return h.handleTreeAPI }, quotaTrackingNone, ""},
 	{"/api/delete", func(h *Handler) http.HandlerFunc { return h.handleAPIDelete }, quotaTrackingTracked,
 		"objects.DeleteObject -> objects_write.go usage.Record (1 API)"},

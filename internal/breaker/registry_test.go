@@ -60,6 +60,24 @@ func TestRegistry_RegisterAndReset(t *testing.T) {
 	}
 }
 
+// TestRegistry_Unregister verifies a superseded runtime backend is no longer
+// swept while every other breaker remains registered.
+func TestRegistry_Unregister(t *testing.T) {
+	a, b := &fakeResetter{}, &fakeResetter{}
+	r := NewRegistry(a, b)
+	r.Unregister(a)
+	r.Unregister(nil)
+	r.Unregister(a) // idempotent
+
+	if got := r.Len(); got != 1 {
+		t.Fatalf("Len = %d, want 1", got)
+	}
+	r.ResetStaleProbes()
+	if a.count != 0 || b.count != 1 {
+		t.Fatalf("reset counts = %d/%d, want 0/1", a.count, b.count)
+	}
+}
+
 // TestRegistry_EmptyResetIsNoOp verifies that ResetStaleProbes on an empty
 // registry does not panic.
 func TestRegistry_EmptyResetIsNoOp(t *testing.T) {

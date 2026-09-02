@@ -49,6 +49,22 @@ func (r *Registry) Register(b StaleProbeResetter) {
 	r.mu.Unlock()
 }
 
+// Unregister removes one exact breaker instance. Runtime backend replacement
+// uses this to stop the watchdog retaining a superseded client forever.
+func (r *Registry) Unregister(target StaleProbeResetter) {
+	if target == nil {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for i, candidate := range r.breakers {
+		if candidate == target {
+			r.breakers = append(r.breakers[:i], r.breakers[i+1:]...)
+			return
+		}
+	}
+}
+
 // ResetStaleProbes invokes ResetStaleProbe on every registered breaker.
 // Safe for concurrent use.
 func (r *Registry) ResetStaleProbes() {
