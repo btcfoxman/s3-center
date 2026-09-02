@@ -256,6 +256,7 @@ func TestUpdateAccountProxyAdoptsStaticBackend(t *testing.T) {
 	}
 }
 
+//nolint:gocognit // Rollback assertions intentionally cover mixed static/managed persistence in one flow.
 func TestUpdateAccountProxyPersistenceFailureRollsBackEarlierBuckets(t *testing.T) {
 	t.Parallel()
 	const accountID = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
