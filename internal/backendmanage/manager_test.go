@@ -94,6 +94,7 @@ func (b *proxyTestBackend) CheckBucket(context.Context) error { return b.checkEr
 type proxyTestStore struct {
 	payloads map[string][]byte
 	writes   int
+	deletes  int
 	attempts int
 	failAt   int
 }
@@ -112,7 +113,11 @@ func (s *proxyTestStore) UpsertManagedBackend(_ context.Context, name string, en
 	return nil
 }
 
-func (s *proxyTestStore) DeleteManagedBackend(context.Context, string) error { return nil }
+func (s *proxyTestStore) DeleteManagedBackend(_ context.Context, name string) error {
+	s.deletes++
+	delete(s.payloads, name)
+	return nil
+}
 
 func (s *proxyTestStore) SyncQuotaLimits(context.Context, []config.BackendConfig) error { return nil }
 
@@ -215,6 +220,42 @@ func TestUpdateAccountProxyProbeFailureLeavesAccountUntouched(t *testing.T) {
 	}
 }
 
+func TestUpdateAccountProxyAdoptsStaticBackend(t *testing.T) {
+	t.Parallel()
+	const accountID = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	definition := managedTestDefinition(t, "r2-static", accountID, "bucket-static", "")
+	definition.Managed = false
+	old := &proxyTestBackend{proxy: "direct"}
+	runtime := proxyTestRuntime([]string{"r2-static"}, map[string]backend.ObjectBackend{"r2-static": old})
+	store := &proxyTestStore{payloads: make(map[string][]byte)}
+	manager, err := New(ManagerDeps{
+		Config: managedTestConfig(), Store: store, Runtime: runtime, Definitions: []Definition{definition},
+		BackendFactory: func(_ context.Context, cfg *config.BackendConfig) (BucketBackend, error) {
+			return &proxyTestBackend{proxy: cfg.ProxyURL}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	views, err := manager.UpdateAccountProxy(context.Background(), &UpdateProxyRequest{
+		AccountID: accountID, ProxyURL: "socks5://proxy.example:1080",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(views) != 1 || !views[0].Managed || !manager.List()[0].Managed {
+		t.Fatalf("static backend was not adopted: views=%+v", views)
+	}
+	stored, err := manager.cipher.open("r2-static", store.payloads["r2-static"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !stored.Managed || stored.Backend.ProxyURL != "socks5://proxy.example:1080" {
+		t.Fatalf("adopted definition = %+v", stored)
+	}
+}
+
 func TestUpdateAccountProxyPersistenceFailureRollsBackEarlierBuckets(t *testing.T) {
 	t.Parallel()
 	const accountID = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
@@ -222,6 +263,7 @@ func TestUpdateAccountProxyPersistenceFailureRollsBackEarlierBuckets(t *testing.
 		managedTestDefinition(t, "r2-a", accountID, "bucket-a", "http://old.example:8080"),
 		managedTestDefinition(t, "r2-b", accountID, "bucket-b", "http://old.example:8080"),
 	}
+	definitions[0].Managed = false
 	oldA := &proxyTestBackend{proxy: "old-a"}
 	oldB := &proxyTestBackend{proxy: "old-b"}
 	runtime := proxyTestRuntime([]string{"r2-a", "r2-b"}, map[string]backend.ObjectBackend{
@@ -239,6 +281,9 @@ func TestUpdateAccountProxyPersistenceFailureRollsBackEarlierBuckets(t *testing.
 	}
 	for idx := range definitions {
 		definition := &definitions[idx]
+		if !definition.Managed {
+			continue
+		}
 		payload, sealErr := manager.cipher.seal(definition.Backend.Name, definition)
 		if sealErr != nil {
 			t.Fatal(sealErr)
@@ -253,6 +298,12 @@ func TestUpdateAccountProxyPersistenceFailureRollsBackEarlierBuckets(t *testing.
 	}
 	for idx := range definitions {
 		definition := &definitions[idx]
+		if !definition.Managed {
+			if _, exists := store.payloads[definition.Backend.Name]; exists {
+				t.Errorf("static backend %s was not removed during rollback", definition.Backend.Name)
+			}
+			continue
+		}
 		stored, openErr := manager.cipher.open(definition.Backend.Name, store.payloads[definition.Backend.Name])
 		if openErr != nil {
 			t.Fatal(openErr)
@@ -265,6 +316,9 @@ func TestUpdateAccountProxyPersistenceFailureRollsBackEarlierBuckets(t *testing.
 	liveB, _ := runtime.GetBackend("r2-b")
 	if liveA != oldA || liveB != oldB {
 		t.Fatal("runtime changed after persistence failure")
+	}
+	if store.deletes != 1 {
+		t.Fatalf("static adoption rollback deletes = %d, want 1", store.deletes)
 	}
 }
 

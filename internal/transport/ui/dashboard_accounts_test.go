@@ -72,7 +72,7 @@ func TestCloudflareUsage_MarksFreeTierOverflowCritical(t *testing.T) {
 	assert.Zero(t, accounts[0].FreeRemainingBytes)
 }
 
-func TestCloudflareUsage_DisablesProxyEditingWhenAccountContainsStaticBackend(t *testing.T) {
+func TestCloudflareUsage_AllowsProxyEditingWhenAccountContainsStaticBackend(t *testing.T) {
 	const accountID = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	accounts := cloudflareUsage([]backendmanage.View{
 		{Name: "managed", Provider: "cloudflare_r2", AccountID: accountID, Managed: true},
@@ -81,5 +81,15 @@ func TestCloudflareUsage_DisablesProxyEditingWhenAccountContainsStaticBackend(t 
 
 	require.Len(t, accounts, 1)
 	assert.True(t, accounts[0].Managed)
+	assert.True(t, accounts[0].ProxyEditable)
+}
+
+func TestCloudflareUsage_DisablesProxyEditingWithoutAccountID(t *testing.T) {
+	t.Parallel()
+	accounts := cloudflareUsage([]backendmanage.View{
+		{Name: "legacy", Provider: "cloudflare_r2", QuotaGroup: "legacy", Managed: false},
+	}, &dashboard.Data{QuotaStats: map[string]core.QuotaStat{}, UsageStats: map[string]core.UsageStat{}})
+
+	require.Len(t, accounts, 1)
 	assert.False(t, accounts[0].ProxyEditable)
 }

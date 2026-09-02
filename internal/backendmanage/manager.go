@@ -52,9 +52,10 @@ type CreateRequest struct {
 	WarningPercent  int    `json:"warning_percent"`
 }
 
-// UpdateProxyRequest changes the server-side egress used by every dynamically
-// managed bucket belonging to one Cloudflare account. An empty ProxyURL means
-// direct access.
+// UpdateProxyRequest changes the server-side egress used by every bucket
+// belonging to one Cloudflare account. Config-managed definitions are adopted
+// into encrypted management storage on their first online update so the
+// change survives a restart. An empty ProxyURL means direct access.
 type UpdateProxyRequest struct {
 	AccountID string `json:"account_id"`
 	ProxyURL  string `json:"proxy_url"`
@@ -112,6 +113,7 @@ type proxyReplacement struct {
 	definition        *Definition
 	encrypted         []byte
 	previousEncrypted []byte
+	previousManaged   bool
 	live              backend.ObjectBackend
 	previousLive      backend.ObjectBackend
 	cb                *backend.CircuitBreakerBackend
@@ -254,9 +256,10 @@ func (m *Manager) Create(ctx context.Context, request *CreateRequest) (View, err
 	return viewOf(definition), nil
 }
 
-// UpdateAccountProxy validates a candidate egress against every managed
-// bucket in the account, then persists and hot-swaps all clients as one
-// logical operation. A failed validation leaves the previous proxy untouched.
+// UpdateAccountProxy validates a candidate egress against every bucket in the
+// account, then persists and hot-swaps all clients as one logical operation.
+// Config-managed definitions are adopted into encrypted management storage.
+// A failed validation leaves the previous proxy untouched.
 func (m *Manager) UpdateAccountProxy(ctx context.Context, request *UpdateProxyRequest) ([]View, error) {
 	if !m.Enabled() {
 		return nil, errors.New("managed backends are disabled")
@@ -295,13 +298,10 @@ func (m *Manager) accountProxyTargets(accountID string) ([]Definition, error) {
 		if definition.Backend.AccountID != accountID {
 			continue
 		}
-		if !definition.Managed {
-			return nil, errors.New("account contains a config-managed backend; update proxy_url in config.yaml")
-		}
 		targets = append(targets, *definition)
 	}
 	if len(targets) == 0 {
-		return nil, errors.New("no dynamically managed backends found for account")
+		return nil, errors.New("no backends found for account")
 	}
 	slices.SortFunc(targets, func(a, b Definition) int {
 		return strings.Compare(a.Backend.Name, b.Backend.Name)
@@ -314,6 +314,7 @@ func (m *Manager) prepareProxyReplacements(ctx context.Context, targets []Defini
 	for idx := range targets {
 		previous := targets[idx]
 		updated := previous
+		updated.Managed = true
 		updated.Backend.ProxyURL = proxyURL
 		if err := config.NormalizeAndValidateBackend(&updated.Backend); err != nil {
 			return nil, err
@@ -337,7 +338,8 @@ func (m *Manager) prepareProxyReplacements(ctx context.Context, targets []Defini
 		previousCB, _ := previousLive.(*backend.CircuitBreakerBackend)
 		replacements = append(replacements, proxyReplacement{
 			definition: &updated, encrypted: encrypted, previousEncrypted: previousEncrypted,
-			live: live, previousLive: previousLive, cb: cbBackend, previousCB: previousCB,
+			previousManaged: previous.Managed,
+			live:            live, previousLive: previousLive, cb: cbBackend, previousCB: previousCB,
 		})
 	}
 	return replacements, nil
@@ -397,7 +399,13 @@ func (m *Manager) restoreStoredProxies(replacements []proxyReplacement) error {
 	var restoreErr error
 	for idx := range replacements {
 		item := &replacements[idx]
-		if err := m.store.UpsertManagedBackend(restoreCtx, item.definition.Backend.Name, item.previousEncrypted); err != nil {
+		var err error
+		if item.previousManaged {
+			err = m.store.UpsertManagedBackend(restoreCtx, item.definition.Backend.Name, item.previousEncrypted)
+		} else {
+			err = m.store.DeleteManagedBackend(restoreCtx, item.definition.Backend.Name)
+		}
+		if err != nil {
 			restoreErr = errors.Join(restoreErr, fmt.Errorf("restore backend %q: %w", item.definition.Backend.Name, err))
 		}
 	}

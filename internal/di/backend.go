@@ -19,6 +19,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"log/slog"
+	"slices"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -82,12 +83,12 @@ func ProvideBackends(i do.Injector) (*BackendsResult, error) {
 }
 
 func loadBackendDefinitions(i do.Injector, cfg *config.Config) ([]backendmanage.Definition, error) {
-	definitions := make([]backendmanage.Definition, 0, len(cfg.Backends))
+	staticDefinitions := make([]backendmanage.Definition, 0, len(cfg.Backends))
 	for idx := range cfg.Backends {
-		definitions = append(definitions, backendmanage.Definition{Version: 1, Backend: cfg.Backends[idx]})
+		staticDefinitions = append(staticDefinitions, backendmanage.Definition{Version: 1, Backend: cfg.Backends[idx]})
 	}
 	if !cfg.ManagedBackends.Enabled {
-		return definitions, nil
+		return staticDefinitions, nil
 	}
 	store, err := do.Invoke[core.MetadataStore](i)
 	if err != nil {
@@ -102,7 +103,7 @@ func loadBackendDefinitions(i do.Injector, cfg *config.Config) ([]backendmanage.
 	if err != nil {
 		return nil, err
 	}
-	definitions = append(definitions, managed...)
+	definitions := mergeBackendDefinitions(staticDefinitions, managed)
 	combined := make([]config.BackendConfig, len(definitions))
 	for idx := range definitions {
 		combined[idx] = definitions[idx].Backend
@@ -111,6 +112,28 @@ func loadBackendDefinitions(i do.Injector, cfg *config.Config) ([]backendmanage.
 		return nil, err
 	}
 	return definitions, nil
+}
+
+// mergeBackendDefinitions preserves configured routing order while allowing
+// an encrypted managed definition to supersede its same-named YAML seed. This
+// is how the first online proxy update adopts an existing static backend
+// without creating a duplicate after restart.
+func mergeBackendDefinitions(staticDefinitions, managedDefinitions []backendmanage.Definition) []backendmanage.Definition {
+	definitions := slices.Clone(staticDefinitions)
+	indexes := make(map[string]int, len(definitions))
+	for idx := range definitions {
+		indexes[definitions[idx].Backend.Name] = idx
+	}
+	for idx := range managedDefinitions {
+		definition := managedDefinitions[idx]
+		if existing, ok := indexes[definition.Backend.Name]; ok {
+			definitions[existing] = definition
+			continue
+		}
+		indexes[definition.Backend.Name] = len(definitions)
+		definitions = append(definitions, definition)
+	}
+	return definitions
 }
 
 func initializeBackendFleet(cfg *config.Config, definitions []backendmanage.Definition) (*BackendsResult, error) {

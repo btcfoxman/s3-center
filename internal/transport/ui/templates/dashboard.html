@@ -127,7 +127,7 @@
           {{if .ProxyEditable}}
           <button type="button" class="cf-card-action cf-proxy-edit" data-account-id="{{.AccountID}}" data-account-label="{{.Label}}" data-current-proxy="{{.Proxy}}">设置 API 代理</button>
           {{else}}
-          <span class="cf-card-static" title="静态账号请修改 config.yaml 中的 proxy_url 并重新部署">代理由 YAML 管理</span>
+          <span class="cf-card-static" title="该账号缺少可验证的 Cloudflare Account ID">缺少 Account ID</span>
           {{end}}
         </div>
       </article>
@@ -489,7 +489,7 @@
     <div class="dialog-heading">
       <span class="section-index">ACCOUNT EGRESS</span>
       <h2>设置 Cloudflare R2 API 代理</h2>
-      <p>一次更新该账号下全部动态托管 Bucket；系统会先经由新出口逐个验证，再热切换连接。</p>
+      <p>一次更新该账号下全部 Bucket；系统会先经由新出口逐个验证，再加密保存并热切换连接。</p>
     </div>
     <input id="proxy-account-id" name="account_id" type="hidden">
     <div class="proxy-current"><span>账号</span><strong id="proxy-account-label"></strong><span>当前出口</span><code id="proxy-current-value"></code></div>
