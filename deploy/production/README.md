@@ -16,4 +16,14 @@ Operator guides:
 
 Required GitHub secrets: `DEPLOY_HOST`, `DEPLOY_USER`, `DEPLOY_SSH_KEY`,
 `DEPLOY_PORT`, `DEPLOY_PATH`, `DEPLOY_SERVICE`, `GHCR_USERNAME`, and
-`GHCR_TOKEN`. Set repository variable `REGISTRY_TARGET=ghcr`.
+`GHCR_TOKEN`. Cloudflare automation also uses `CF_ACCOUNT_ID` and
+`CF_API_TOKEN`; the latter needs Tunnel/DNS permissions plus `OAuth Clients
+Write` to create the public onboarding client. Set repository variable
+`REGISTRY_TARGET=ghcr`.
+
+The production workflow resolves current OAuth scope IDs from Cloudflare,
+creates the public client, adds its publisher-verification TXT record, and
+stores the one-time client secret only in the server `.env`. If the deployment
+token lacks `OAuth Clients Write`, deployment remains healthy with
+`CF_OAUTH_ENABLED=false` and a later run resumes provisioning after the token
+permission is corrected.

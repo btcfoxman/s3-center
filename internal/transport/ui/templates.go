@@ -19,7 +19,7 @@ import (
 	"github.com/afreidah/s3-orchestrator/internal/util/humanize"
 )
 
-//go:embed templates/*.html static/*
+//go:embed templates/*.html static/* connector/*
 var embeddedFS embed.FS
 
 // staticFS is the rooted view of the embedded static/ directory used

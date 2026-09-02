@@ -23,6 +23,7 @@ import (
 
 	"github.com/afreidah/s3-orchestrator/internal/backendmanage"
 	"github.com/afreidah/s3-orchestrator/internal/breaker"
+	"github.com/afreidah/s3-orchestrator/internal/cloudflareonboard"
 	"github.com/afreidah/s3-orchestrator/internal/compression"
 	"github.com/afreidah/s3-orchestrator/internal/config"
 	"github.com/afreidah/s3-orchestrator/internal/debug"
@@ -173,24 +174,26 @@ func ProvideUIHandler(i do.Injector) (*ui.Handler, error) {
 	reconciler := resolve[*reconcile.Manager](r)
 	opsSvc := resolve[*ops.Services](r)
 	backendManagement := resolve[*backendmanage.Manager](r)
+	cloudflareOnboarding := resolve[*cloudflareonboard.Service](r)
 	if r.err != nil {
 		return nil, r.err
 	}
 
 	return ui.New(&ui.Deps{
-		Dashboard:         aggregator,
-		Sync:              reconciler,
-		Objects:           opsSvc.Objects,
-		Integrity:         opsSvc.Integrity,
-		Replication:       opsSvc.Replication,
-		Rebalance:         opsSvc.Rebalance,
-		Encryption:        opsSvc.Encryption,
-		Compression:       opsSvc.Compression,
-		DBHealthy:         cb.IsHealthy,
-		Cfg:               cfg,
-		LogBuffer:         logBuffer,
-		LoginThrottle:     loginThrottle,
-		BackendManagement: backendManagement,
+		Dashboard:            aggregator,
+		Sync:                 reconciler,
+		Objects:              opsSvc.Objects,
+		Integrity:            opsSvc.Integrity,
+		Replication:          opsSvc.Replication,
+		Rebalance:            opsSvc.Rebalance,
+		Encryption:           opsSvc.Encryption,
+		Compression:          opsSvc.Compression,
+		DBHealthy:            cb.IsHealthy,
+		Cfg:                  cfg,
+		LogBuffer:            logBuffer,
+		LoginThrottle:        loginThrottle,
+		BackendManagement:    backendManagement,
+		CloudflareOnboarding: cloudflareOnboarding,
 	}), nil
 }
 

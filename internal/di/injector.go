@@ -93,6 +93,7 @@ func registerBackendStack(inj do.Injector) {
 	do.Provide(inj, ProvideBreakerRegistry)
 	do.Provide(inj, ProvideBackendRuntime)
 	do.Provide(inj, ProvideBackendManagement)
+	do.Provide(inj, ProvideCloudflareOnboarding)
 	do.Provide(inj, ProvideIntegrityConfig)
 	do.Provide(inj, ProvideWriteCoordinator)
 	do.Provide(inj, ProvideMultipartManager)

@@ -29,6 +29,7 @@ import (
 	"github.com/afreidah/s3-orchestrator/internal/backendmanage"
 	"github.com/afreidah/s3-orchestrator/internal/breaker"
 	objcache "github.com/afreidah/s3-orchestrator/internal/cache"
+	"github.com/afreidah/s3-orchestrator/internal/cloudflareonboard"
 	"github.com/afreidah/s3-orchestrator/internal/compression"
 	"github.com/afreidah/s3-orchestrator/internal/config"
 	"github.com/afreidah/s3-orchestrator/internal/counter"
@@ -214,6 +215,20 @@ func ProvideBackendManagement(i do.Injector) (*backendmanage.Manager, error) {
 	return backendmanage.New(backendmanage.ManagerDeps{
 		Config: cfg, Store: managedStore, Runtime: runtime, BreakerRegistry: registry,
 		Definitions: backends.Definitions,
+	})
+}
+
+// ProvideCloudflareOnboarding wires the short-lived OAuth provisioning
+// sessions to runtime backend management.
+func ProvideCloudflareOnboarding(i do.Injector) (*cloudflareonboard.Service, error) {
+	r := newResolver(i)
+	cfg := resolve[*config.Config](r)
+	manager := resolve[*backendmanage.Manager](r)
+	if r.err != nil {
+		return nil, r.err
+	}
+	return cloudflareonboard.New(&cloudflareonboard.Options{
+		Config: cfg.CloudflareOAuth, Backends: manager,
 	})
 }
 

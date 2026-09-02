@@ -1,0 +1,10 @@
+{
+  "name": "s3-center-cloudflare-connector",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Local isolated-browser connector for S3 Center Cloudflare onboarding",
+  "dependencies": {
+    "playwright-core": "1.62.1"
+  }
+}

@@ -51,6 +51,10 @@ type uiAPIRoute struct {
 // whether the route is quota-tracked.
 var uiAPIRoutes = []uiAPIRoute{
 	{"/api/dashboard", func(h *Handler) http.HandlerFunc { return h.handleAPIDashboard }, quotaTrackingNone, ""},
+	{"/api/cloudflare-onboarding/start", func(h *Handler) http.HandlerFunc { return h.handleCloudflareOnboardingStart }, quotaTrackingNone, ""},
+	{"/api/cloudflare-onboarding/status", func(h *Handler) http.HandlerFunc { return h.handleCloudflareOnboardingStatus }, quotaTrackingNone, ""},
+	{"/api/cloudflare-onboarding/complete", func(h *Handler) http.HandlerFunc { return h.handleCloudflareOnboardingComplete }, quotaTrackingTracked,
+		"one-time HeadBucket validates the generated bucket credential before registration; token provisioning is control-plane traffic"},
 	{"/api/r2-accounts", func(h *Handler) http.HandlerFunc { return h.handleAPIR2Accounts }, quotaTrackingTracked,
 		"one-time HeadBucket validates the candidate before registration; it is intentionally outside operational counters"},
 	{"/api/r2-account-proxy", func(h *Handler) http.HandlerFunc { return h.handleAPIR2AccountProxy }, quotaTrackingTracked,
@@ -98,6 +102,11 @@ func (h *Handler) Register(mux *http.ServeMux, prefix string) {
 	h.prefix = prefix
 	mux.HandleFunc(prefix+loginPath, h.handleLogin)
 	mux.HandleFunc(prefix+"/logout", h.handleLogout)
+	mux.HandleFunc(prefix+"/oauth/cloudflare/callback", h.handleCloudflareOAuthCallback)
+	mux.HandleFunc(prefix+"/oauth/cloudflare/info", h.handleCloudflareOAuthInfo)
+	mux.HandleFunc(prefix+"/connector/cloudflare/session", h.handleCloudflareConnectorSession)
+	mux.HandleFunc(prefix+"/connector/cloudflare/report", h.handleCloudflareConnectorReport)
+	mux.HandleFunc(prefix+"/connector/download", h.requireAuth(h.handleCloudflareConnectorDownload))
 	mux.HandleFunc(prefix+"/", h.requireAuth(h.handleDashboard))
 	for _, route := range uiAPIRoutes {
 		mux.HandleFunc(prefix+route.suffix, h.requireAuth(route.handler(h)))

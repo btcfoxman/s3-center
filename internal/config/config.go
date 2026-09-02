@@ -79,6 +79,7 @@ type Config struct {
 	Debug                 DebugConfig                 `yaml:"debug"`
 	DirectUpload          DirectUploadConfig          `yaml:"direct_upload"`
 	ManagedBackends       ManagedBackendsConfig       `yaml:"managed_backends"`
+	CloudflareOAuth       CloudflareOAuthConfig       `yaml:"cloudflare_oauth"`
 	RoutingStrategy       RoutingStrategy             `yaml:"routing_strategy"` // "pack" (default) or "spread"
 }
 
@@ -122,7 +123,22 @@ func (c *Config) SetDefaultsAndValidate() error {
 	errs = append(errs, c.validateRoutingStrategy()...)
 	errs = append(errs, c.validateQuotaReplicationCombo()...)
 	errs = append(errs, c.validateIndexOnlyMode()...)
+	errs = append(errs, c.validateCloudflareOAuthCombo()...)
 	return errors.Join(errs...)
+}
+
+func (c *Config) validateCloudflareOAuthCombo() []error {
+	if !c.CloudflareOAuth.Enabled {
+		return nil
+	}
+	var errs []error
+	if !c.UI.Enabled {
+		errs = append(errs, fmt.Errorf("cloudflare_oauth.enabled requires ui.enabled"))
+	}
+	if !c.ManagedBackends.Enabled {
+		errs = append(errs, fmt.Errorf("cloudflare_oauth.enabled requires managed_backends.enabled"))
+	}
+	return errs
 }
 
 // validateIndexOnlyMode rejects features that require object bodies to pass
@@ -182,6 +198,7 @@ func (c *Config) validatePerTypeSections() []error {
 	errs = append(errs, c.Debug.FlightRecorder.setDefaultsAndValidate()...)
 	errs = append(errs, c.DirectUpload.setDefaultsAndValidate()...)
 	errs = append(errs, c.ManagedBackends.setDefaultsAndValidate()...)
+	errs = append(errs, c.CloudflareOAuth.setDefaultsAndValidate()...)
 	if c.Redis != nil {
 		errs = append(errs, c.Redis.setDefaultsAndValidate()...)
 	}
@@ -316,6 +333,9 @@ func topLevelFieldsChanged(old, new *Config) []string {
 	}
 	if old.ManagedBackends != new.ManagedBackends {
 		changed = append(changed, "managed_backends")
+	}
+	if !reflect.DeepEqual(old.CloudflareOAuth, new.CloudflareOAuth) {
+		changed = append(changed, "cloudflare_oauth")
 	}
 	if !reflect.DeepEqual(old.DirectUpload, new.DirectUpload) {
 		changed = append(changed, "direct_upload")

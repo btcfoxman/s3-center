@@ -4,7 +4,35 @@
 
 这里的“添加账号”指接入你有权使用的现有 Cloudflare Account/R2 Bucket。系统不会注册 Cloudflare 账号，也不会绕过服务商规则获取额度。
 
-## 接入前准备
+## 推荐：隔离浏览器快速授权
+
+生产环境配置 Cloudflare OAuth 后，管理员不再需要到处寻找 Account ID、Access Key 和 Secret。登录管理端，在 **Cloudflare 账号额度** 区域点击 **新增 CF 身份**：
+
+1. 首次使用先下载 Connector ZIP，解压后运行 `powershell -ExecutionPolicy Bypass -File .\install.ps1`。它只为当前 Windows 用户注册 `s3center://`，不需要管理员权限。
+2. 填写身份备注，以及该 CF 身份固定使用的代理（HTTP、HTTPS、SOCKS5/SOCKS5H，均可含用户名密码）。
+3. 点击 **创建隔离登录**，再点击 **打开隔离 Cloudflare 登录**。
+4. Connector 在 `%LOCALAPPDATA%\S3Center\Profiles\<profile-id>` 打开独立 Edge/Chrome Profile，先访问 Cloudflare trace 校验出口 IP；代理失败会终止，不会回退本机直连。
+5. 在新窗口登录对应 CF 身份并同意授权。管理端随后自动列出已授权 Account 与 R2 Bucket；选择一个 Bucket 即可创建最小权限凭据并热接入。
+
+每个登录身份拥有独立 Cookie、Profile ID 和代理绑定，不会与另一个 CF 身份共用浏览器状态。自定义 URI 里只有一次性票据，没有代理密码；票据兑换响应禁止缓存且只能读取一次。Profile 元数据只记录脱敏的代理 endpoint，不记录代理认证信息。
+
+OAuth Access Token 只存在于服务端内存中的短期会话（生产默认 20 分钟），不写数据库。完成选择后，系统使用它创建一个仅限目标 Bucket 的 Account-owned R2 Token，将 R2 Access Key / Secret 和代理整体加密保存，然后从内存清除 OAuth Token。创建后端失败时，刚创建的 R2 Token 会自动撤销。
+
+同一身份要接入更多 Bucket 时，点击账号卡片的 **授权 / 添加 Bucket**，复用原 Profile 与原代理重新授权即可。修改账号代理时，系统会为该身份生成新的 Profile ID，防止旧 Cookie 在不同出口间复用。
+
+Cloudflare OAuth Client 需要以下必选 scope：
+
+- `Account Read`：列出本次授权选择的 Account。
+- `Workers R2 Storage Read`：发现已有 R2 Bucket。
+- `Account API Tokens Write`：创建、验证失败时撤销 Bucket 级 R2 Token。
+
+OAuth Client 必须是 **public** 才能让非发布者账号的 Cloudflare 用户授权；发布者域名必须先通过 Cloudflare TXT 校验。Cloudflare Access 不是本流程的依赖：管理端已有自己的会话和 CSRF 防护；如需额外企业身份门禁，才在它前面可选叠加 Access，并确保 OAuth callback 不被 Access 拦截。
+
+## 备选：手动凭据接入
+
+OAuth 未启用或不允许 Token 管理权限时，仍可使用手动模式。
+
+### 接入前准备
 
 1. 在 Cloudflare Dashboard 进入目标 Account 的 R2。
 2. 创建目标 Bucket；管理端不会代替 Cloudflare 创建 Bucket。
@@ -13,7 +41,7 @@
 
 管理端需要的是 R2 S3 凭据，不是普通 Cloudflare API Token，也不是 Global API Key。Secret 只在提交时出现，服务端会用 AES-256-GCM 整体加密账号定义后写入数据库，列表和日志都不会返回它。
 
-## 在管理端添加
+### 在管理端添加
 
 登录 `https://s3-center.aiid.qzz.io/ui/`，在 **Cloudflare 账号额度** 区域点击 **接入 R2 账号**，填写：
 
@@ -93,6 +121,19 @@ managed_backends:
   enabled: true
   master_key: "${DYNAMIC_BACKEND_MASTER_KEY}"
   default_warning_percent: 80
+
+cloudflare_oauth:
+  enabled: true
+  client_id: "${CF_OAUTH_CLIENT_ID}"
+  client_secret: "${CF_OAUTH_CLIENT_SECRET}"
+  redirect_url: "https://s3-center.example.com/ui/oauth/cloudflare/callback"
+  scopes:
+    - "${CF_OAUTH_SCOPE_ACCOUNT_READ}"
+    - "${CF_OAUTH_SCOPE_R2_READ}"
+    - "${CF_OAUTH_SCOPE_TOKEN_WRITE}"
+  session_ttl: "20m"
+  connector_scheme: s3center
+  token_endpoint_auth_method: client_secret_basic
 ```
 
 `DYNAMIC_BACKEND_MASTER_KEY` 至少 32 字节，必须只保存在服务器 Secret/`.env` 中，不得提交到 Git。它是解密所有动态账号定义的根密钥：
@@ -105,8 +146,8 @@ managed_backends:
 
 ## 当前边界
 
-- 当前管理端支持新增、查看以及按账号在线修改代理；暂不提供在线修改 R2 凭据或直接删除账号。需要回收账号时，应先在 Cloudflare 撤销 Token，并按维护流程迁移对象后更新数据库/配置；不要直接删除仍承载对象的 Backend。
+- 当前管理端支持 OAuth 快速新增、手动凭据新增、查看以及按账号在线修改代理；暂不提供直接删除账号。需要回收账号时，应先在 Cloudflare 撤销 Token，并按维护流程迁移对象后更新数据库/配置；不要直接删除仍承载对象的 Backend。
 - 页面不调用 Cloudflare Billing API，因此不会显示 Cloudflare 全账号的权威 Class A/Class B 或来自其他工具的用量。
 - 一个 Cloudflare Account 的免费额度由 Account 下的所有 R2 Bucket 共享。为同一个 Account 新增 Bucket 不会新增 10 GB；只有接入另一个独立且合规授权的 Account 才会形成另一张免费额度卡。
 
-Cloudflare 官方参考：[S3 API 凭据与 endpoint](https://developers.cloudflare.com/r2/api/tokens/)、[R2 定价与免费额度](https://developers.cloudflare.com/r2/pricing/)。
+Cloudflare 官方参考：[创建 OAuth Client](https://developers.cloudflare.com/fundamentals/oauth/create-an-oauth-client/)、[OAuth 接入端点](https://developers.cloudflare.com/fundamentals/oauth/integrate-with-cloudflare/)、[S3 API 凭据与 endpoint](https://developers.cloudflare.com/r2/api/tokens/)、[R2 定价与免费额度](https://developers.cloudflare.com/r2/pricing/)。

@@ -3,6 +3,8 @@ package backendmanage
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"net/url"
@@ -34,9 +36,28 @@ var (
 // Definition is the encrypted durable representation. Version allows future
 // schema migrations without exposing secrets as relational columns.
 type Definition struct {
-	Version int                  `json:"version"`
-	Backend config.BackendConfig `json:"backend"`
-	Managed bool                 `json:"managed"`
+	Version    int                  `json:"version"`
+	Backend    config.BackendConfig `json:"backend"`
+	Managed    bool                 `json:"managed"`
+	Connection *Connection          `json:"connection,omitempty"`
+}
+
+// Connection identifies the local browser identity used to authorize an R2
+// backend. It deliberately contains no browser cookies or OAuth tokens.
+type Connection struct {
+	IdentityID   string    `json:"identity_id"`
+	ProfileID    string    `json:"profile_id"`
+	AuthMode     string    `json:"auth_mode"`
+	AuthorizedAt time.Time `json:"authorized_at"`
+}
+
+// AccountConnection is the internal account context used to start a fresh
+// OAuth authorization through the same proxy and isolated browser profile.
+type AccountConnection struct {
+	AccountID    string
+	AccountLabel string
+	ProxyURL     string
+	Connection   *Connection
 }
 
 // CreateRequest is accepted from the authenticated admin UI.
@@ -75,6 +96,9 @@ type View struct {
 	WarningPercent  int    `json:"warning_percent"`
 	Proxy           string `json:"proxy"`
 	Managed         bool   `json:"managed"`
+	IdentityID      string `json:"identity_id,omitempty"`
+	ProfileID       string `json:"profile_id,omitempty"`
+	AuthMode        string `json:"auth_mode,omitempty"`
 }
 
 type Store interface {
@@ -189,15 +213,34 @@ func viewOf(definition *Definition) View {
 			proxy = parsed.Scheme + "://" + parsed.Host
 		}
 	}
-	return View{
+	view := View{
 		Name: b.Name, Provider: b.Provider, AccountLabel: b.AccountLabel, AccountID: b.AccountID,
 		Bucket: b.Bucket, QuotaGroup: b.QuotaGroup, FreeTierBytes: b.RawLimitBytes,
 		AdmissibleBytes: b.QuotaBytes, WarningPercent: b.WarningPercent,
 		Proxy: proxy, Managed: definition.Managed,
 	}
+	if definition.Connection != nil {
+		view.IdentityID = definition.Connection.IdentityID
+		view.ProfileID = definition.Connection.ProfileID
+		view.AuthMode = definition.Connection.AuthMode
+	}
+	return view
 }
 
 func (m *Manager) Create(ctx context.Context, request *CreateRequest) (View, error) {
+	return m.create(ctx, request, nil)
+}
+
+// CreateProvisioned registers a backend whose bucket-scoped credentials were
+// created during a Cloudflare OAuth session.
+func (m *Manager) CreateProvisioned(ctx context.Context, request *CreateRequest, connection Connection) (View, error) {
+	if connection.IdentityID == "" || connection.ProfileID == "" || connection.AuthMode != "cloudflare_oauth" {
+		return View{}, errors.New("invalid Cloudflare OAuth connection metadata")
+	}
+	return m.create(ctx, request, &connection)
+}
+
+func (m *Manager) create(ctx context.Context, request *CreateRequest, connection *Connection) (View, error) {
 	if !m.Enabled() {
 		return View{}, errors.New("managed backends are disabled")
 	}
@@ -207,6 +250,7 @@ func (m *Manager) Create(ctx context.Context, request *CreateRequest) (View, err
 	if err != nil {
 		return View{}, err
 	}
+	definition.Connection = connection
 	name := definition.Backend.Name
 
 	m.mu.RLock()
@@ -254,6 +298,50 @@ func (m *Manager) Create(ctx context.Context, request *CreateRequest) (View, err
 	m.mu.Unlock()
 	rollback = false
 	return viewOf(definition), nil
+}
+
+// ConnectionForAccount returns the encrypted-definition fields needed to
+// relaunch OAuth for an existing account. Callers must not expose ProxyURL.
+func (m *Manager) ConnectionForAccount(accountID string) (AccountConnection, error) {
+	accountID = strings.ToLower(strings.TrimSpace(accountID))
+	if !accountIDPattern.MatchString(accountID) {
+		return AccountConnection{}, errors.New("cloudflare account ID must be 32 hexadecimal characters")
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	var selected *Definition
+	for _, definition := range m.definitions {
+		if definition.Backend.AccountID != accountID {
+			continue
+		}
+		if selected == nil || preferAccountConnection(definition, selected) {
+			selected = definition
+		}
+	}
+	if selected == nil {
+		return AccountConnection{}, errors.New("no backends found for account")
+	}
+	result := AccountConnection{
+		AccountID: accountID, AccountLabel: selected.Backend.AccountLabel,
+		ProxyURL: selected.Backend.ProxyURL,
+	}
+	if selected.Connection != nil {
+		copyOfConnection := *selected.Connection
+		result.Connection = &copyOfConnection
+	}
+	return result, nil
+}
+
+func preferAccountConnection(candidate, current *Definition) bool {
+	candidateOAuth := candidate.Connection != nil && candidate.Connection.AuthMode == "cloudflare_oauth"
+	currentOAuth := current.Connection != nil && current.Connection.AuthMode == "cloudflare_oauth"
+	if candidateOAuth != currentOAuth {
+		return candidateOAuth
+	}
+	if candidateOAuth && !candidate.Connection.AuthorizedAt.Equal(current.Connection.AuthorizedAt) {
+		return candidate.Connection.AuthorizedAt.After(current.Connection.AuthorizedAt)
+	}
+	return candidate.Backend.Name < current.Backend.Name
 }
 
 // UpdateAccountProxy validates a candidate egress against every bucket in the
@@ -309,13 +397,32 @@ func (m *Manager) accountProxyTargets(accountID string) ([]Definition, error) {
 	return targets, nil
 }
 
+//nolint:gocognit // Preparing an atomic multi-backend replacement requires all rollback state to be assembled together.
 func (m *Manager) prepareProxyReplacements(ctx context.Context, targets []Definition, proxyURL string) ([]proxyReplacement, error) {
+	profileID := ""
+	for idx := range targets {
+		if targets[idx].Connection != nil && targets[idx].Backend.ProxyURL != proxyURL {
+			var err error
+			profileID, err = newProfileID()
+			if err != nil {
+				return nil, err
+			}
+			break
+		}
+	}
 	replacements := make([]proxyReplacement, 0, len(targets))
 	for idx := range targets {
 		previous := targets[idx]
 		updated := previous
 		updated.Managed = true
 		updated.Backend.ProxyURL = proxyURL
+		if updated.Connection != nil {
+			connection := *updated.Connection
+			if profileID != "" {
+				connection.ProfileID = profileID
+			}
+			updated.Connection = &connection
+		}
 		if err := config.NormalizeAndValidateBackend(&updated.Backend); err != nil {
 			return nil, err
 		}
@@ -343,6 +450,14 @@ func (m *Manager) prepareProxyReplacements(ctx context.Context, targets []Defini
 		})
 	}
 	return replacements, nil
+}
+
+func newProfileID() (string, error) {
+	random := make([]byte, 8)
+	if _, err := rand.Read(random); err != nil {
+		return "", fmt.Errorf("create browser profile ID: %w", err)
+	}
+	return "cf-" + hex.EncodeToString(random), nil
 }
 
 func (m *Manager) persistProxyReplacements(ctx context.Context, replacements []proxyReplacement) error {

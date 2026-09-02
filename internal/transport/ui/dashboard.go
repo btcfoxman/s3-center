@@ -44,6 +44,7 @@ type dashboardPage struct {
 	TotalOrphanBytes       int64
 	CloudflareAccounts     []cloudflareAccountUsage
 	ManagedBackendsEnabled bool
+	CloudflareOAuthEnabled bool
 	IndexOnly              bool
 }
 
@@ -67,6 +68,8 @@ type cloudflareAccountUsage struct {
 	State              string
 	Managed            bool
 	ProxyEditable      bool
+	ProfileID          string
+	AuthMode           string
 }
 
 func cloudflareUsage(views []backendmanage.View, data *dashboard.Data) []cloudflareAccountUsage {
@@ -97,6 +100,12 @@ func mergeCloudflareUsage(groups map[string]*cloudflareAccountUsage, view *backe
 	}
 	account.Managed = account.Managed || view.Managed
 	account.ProxyEditable = account.ProxyEditable && view.AccountID != ""
+	if account.ProfileID == "" {
+		account.ProfileID = view.ProfileID
+	}
+	if account.AuthMode == "" {
+		account.AuthMode = view.AuthMode
+	}
 	account.Backends = append(account.Backends, view.Name)
 	account.Buckets = append(account.Buckets, view.Bucket)
 	stat := data.QuotaStats[view.Name]
@@ -128,6 +137,7 @@ func newCloudflareAccountUsage(view *backendmanage.View, key string) *cloudflare
 		Label: label, AccountID: view.AccountID, AccountIDShort: shortID, QuotaGroup: key, Proxy: view.Proxy,
 		FreeTierBytes: view.FreeTierBytes, AdmissibleBytes: view.AdmissibleBytes,
 		WarningPercent: view.WarningPercent, Managed: view.Managed, ProxyEditable: view.AccountID != "",
+		ProfileID: view.ProfileID, AuthMode: view.AuthMode,
 	}
 }
 
@@ -262,6 +272,7 @@ func (h *Handler) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		TotalBytesLimit:        totalLimit,
 		TotalOrphanBytes:       totalOrphan,
 		ManagedBackendsEnabled: h.backendManagement != nil && h.backendManagement.Enabled(),
+		CloudflareOAuthEnabled: h.cloudflareOnboarding != nil && h.cloudflareOnboarding.Enabled(),
 		IndexOnly:              cfg.DirectUpload.IndexOnly,
 		Config: configSummary{
 			RoutingStrategy:           string(cfg.RoutingStrategy),

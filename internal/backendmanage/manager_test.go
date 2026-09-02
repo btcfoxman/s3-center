@@ -83,6 +83,28 @@ func TestViewRedactsProxyCredentials(t *testing.T) {
 	}
 }
 
+func TestConnectionForAccountPrefersOAuthProfileOverManualBackend(t *testing.T) {
+	t.Parallel()
+	const accountID = "0123456789abcdef0123456789abcdef"
+	manual := managedTestDefinition(t, "a-manual", accountID, "manual-bucket", "http://manual.example:8080")
+	oauth := managedTestDefinition(t, "z-oauth", accountID, "oauth-bucket", "http://oauth.example:8080")
+	oauth.Connection = &Connection{
+		IdentityID: "cfi-0123456789abcdef01234567", ProfileID: "cf-0123456789abcdef", AuthMode: "cloudflare_oauth",
+	}
+	manager := &Manager{definitions: map[string]*Definition{
+		manual.Backend.Name: &manual,
+		oauth.Backend.Name:  &oauth,
+	}}
+
+	connection, err := manager.ConnectionForAccount(accountID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if connection.Connection == nil || connection.Connection.ProfileID != oauth.Connection.ProfileID || connection.ProxyURL != oauth.Backend.ProxyURL {
+		t.Fatalf("selected account connection = %+v, want OAuth profile", connection)
+	}
+}
+
 type proxyTestBackend struct {
 	backend.ObjectBackend
 	proxy    string
@@ -128,6 +150,11 @@ func TestUpdateAccountProxyValidatesPersistsAndHotSwapsEveryBucket(t *testing.T)
 	definitions := []Definition{
 		managedTestDefinition(t, "r2-a", accountID, "bucket-a", "http://old.example:8080"),
 		managedTestDefinition(t, "r2-b", accountID, "bucket-b", "http://old.example:8080"),
+	}
+	for idx := range definitions {
+		definitions[idx].Connection = &Connection{
+			IdentityID: "cfi-0123456789abcdef01234567", ProfileID: "cf-0123456789abcdef", AuthMode: "cloudflare_oauth",
+		}
 	}
 	oldA := &proxyTestBackend{proxy: "old-a"}
 	oldB := &proxyTestBackend{proxy: "old-b"}
@@ -180,6 +207,12 @@ func TestUpdateAccountProxyValidatesPersistsAndHotSwapsEveryBucket(t *testing.T)
 	}
 	if views[0].Proxy != "http://proxy.example:3128" {
 		t.Errorf("browser proxy = %q, want credentials redacted", views[0].Proxy)
+	}
+	if views[0].ProfileID == "cf-0123456789abcdef" || views[0].ProfileID == "" || views[0].ProfileID != views[1].ProfileID {
+		t.Errorf("proxy change did not rotate one shared isolated profile: %+v", views)
+	}
+	if views[0].IdentityID != "cfi-0123456789abcdef01234567" || views[0].AuthMode != "cloudflare_oauth" {
+		t.Errorf("proxy change lost identity metadata: %+v", views[0])
 	}
 	if runtime.BackendOrder()[0] != "r2-a" || runtime.BackendOrder()[1] != "r2-b" {
 		t.Fatalf("routing order changed: %v", runtime.BackendOrder())

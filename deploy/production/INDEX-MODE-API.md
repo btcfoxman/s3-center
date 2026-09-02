@@ -90,7 +90,7 @@ Idempotency-Key: <UUID>
   "id": "du_4a6d...",
   "status": "url_issued",
   "declared_bytes": 482913,
-  "expires_at": "2026-09-01T12:10:00Z",
+  "expires_at": "2026-09-01T15:10:00Z",
   "upload": {
     "method": "PUT",
     "url": "https://<account>.r2.cloudflarestorage.com/<bucket>/__objects/du_4a6d....pdf?...",
@@ -98,7 +98,7 @@ Idempotency-Key: <UUID>
       "Content-Type": ["application/pdf"],
       "X-Amz-Meta-Upload-Id": ["du_4a6d..."]
     },
-    "expires_at": "2026-09-01T12:10:00Z"
+    "expires_at": "2026-09-01T15:10:00Z"
   }
 }
 ```
@@ -131,7 +131,7 @@ S3 Center 会 `HEAD` 上游对象，验证字节数、Content-Type 与会话标�
   "status": "committed",
   "logical_key": "assets/partners/acme/2026/report.pdf",
   "declared_bytes": 482913,
-  "expires_at": "2026-09-01T12:10:00Z"
+  "expires_at": "2026-09-01T15:10:00Z"
 }
 ```
 
@@ -178,7 +178,7 @@ Content-Type: application/json
     "method": "PUT",
     "url": "https://<actual-upstream>/...?partNumber=1&...",
     "headers": {},
-    "expires_at": "2026-09-01T12:10:00Z"
+    "expires_at": "2026-09-01T15:10:00Z"
   }
 }
 ```
@@ -247,11 +247,11 @@ Content-Type: application/json
   "bucket": "assets",
   "key": "partners/acme/2026/report.pdf",
   "method": "GET",
-  "expires_seconds": 300
+  "expires_seconds": 10800
 }
 ```
 
-`method` 只能是 `GET` 或 `HEAD`。`expires_seconds` 省略或为 `0` 时使用服务端默认值，不能超过服务端上限。
+`method` 只能是 `GET` 或 `HEAD`。生产环境默认与上限均为 **3 小时（10,800 秒）**：`expires_seconds` 省略、为 `0` 或填写 `10800` 都会得到 3 小时授权；调用方也可以填写更小的正整数主动缩短有效期。
 
 返回 `200`：
 
@@ -264,7 +264,7 @@ Content-Type: application/json
     "method": "GET",
     "url": "https://<actual-upstream>/__objects/du_4a6d....pdf?...",
     "headers": {},
-    "expires_at": "2026-09-01T12:08:12Z"
+    "expires_at": "2026-09-01T15:08:12Z"
   }
 }
 ```
@@ -313,7 +313,7 @@ async function download(bucket, key) {
   const grant = await fetch(`${control}/v1/objects/presign`, {
     method: "POST",
     headers: {...auth, "Content-Type": "application/json"},
-    body: JSON.stringify({bucket, key, method: "GET", expires_seconds: 300}),
+    body: JSON.stringify({bucket, key, method: "GET", expires_seconds: 10800}),
   });
   if (!grant.ok) throw new Error(await grant.text());
   const {request} = await grant.json();
@@ -339,7 +339,7 @@ grant = requests.post(
     f"{CONTROL}/v1/objects/presign",
     headers=AUTH,
     json={"bucket": "assets", "key": "partners/acme/2026/report.pdf",
-          "method": "GET", "expires_seconds": 300},
+          "method": "GET", "expires_seconds": 10800},
 )
 grant.raise_for_status()
 request = grant.json()["request"]

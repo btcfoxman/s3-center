@@ -184,6 +184,32 @@ jobs:
             fi
           done
 
+      - name: Provision public Cloudflare OAuth client
+        shell: bash
+        env:
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+        run: bash deploy/production/provision-cloudflare-oauth.sh
+
+      - name: Reload OAuth configuration and verify
+        shell: bash
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+          DEPLOY_SERVICE: ${{ secrets.DEPLOY_SERVICE }}
+        run: |
+          ssh -i ~/.ssh/deploy_key -p "${DEPLOY_PORT:-22}" "$DEPLOY_USER@$DEPLOY_HOST" \
+            "cd '$DEPLOY_PATH' && \
+             IMAGE_REGISTRY='$IMAGE_REGISTRY' IMAGE_NAMESPACE='$IMAGE_NAMESPACE' IMAGE_NAME='$IMAGE_NAME' IMAGE_TAG='$IMAGE_TAG' docker compose up -d --force-recreate '$DEPLOY_SERVICE' && \
+             for i in \$(seq 1 30); do curl -fsS http://127.0.0.1:48080/health/ready && exit 0; sleep 2; done; \
+             docker compose ps; docker compose logs --tail=120 '$DEPLOY_SERVICE'; exit 1"
+
       - name: Verify public endpoint
         shell: bash
         run: |

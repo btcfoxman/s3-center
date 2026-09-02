@@ -87,7 +87,7 @@
         <p>按 Account 聚合所有 R2 Bucket；免费存储是 GB-month 口径，卡片水位为当前对象占用</p>
       </div>
       {{if .ManagedBackendsEnabled}}
-      <button id="account-add-btn" class="btn-upload"><span>接入 R2 账号</span><b aria-hidden="true">＋</b></button>
+      <button id="account-add-btn" class="btn-upload"><span>{{if .CloudflareOAuthEnabled}}新增 CF 身份{{else}}接入 R2 账号{{end}}</span><b aria-hidden="true">＋</b></button>
       {{end}}
     </div>
     <div class="cf-account-grid">
@@ -121,9 +121,13 @@
           <span>{{.Proxy}}</span>
           <span>{{len .Backends}} backend · {{range $i, $b := .Buckets}}{{if $i}}, {{end}}{{$b}}{{end}}</span>
           {{if .Managed}}<span class="cf-managed">动态托管</span>{{end}}
+          {{if eq .AuthMode "cloudflare_oauth"}}<span class="cf-oauth-badge">OAUTH PROFILE · {{.ProfileID}}</span>{{end}}
         </div>
         <div class="cf-account-controls">
           <a class="cf-card-action" href="#object-browser">管理存储内容</a>
+          {{if and $.CloudflareOAuthEnabled (eq .AuthMode "cloudflare_oauth")}}
+          <button type="button" class="cf-card-action cf-oauth-reauthorize" data-account-id="{{.AccountID}}" data-account-label="{{.Label}}">授权 / 添加 Bucket</button>
+          {{end}}
           {{if .ProxyEditable}}
           <button type="button" class="cf-card-action cf-proxy-edit" data-account-id="{{.AccountID}}" data-account-label="{{.Label}}" data-current-proxy="{{.Proxy}}">设置 API 代理</button>
           {{else}}
@@ -506,14 +510,65 @@
   </form>
 </dialog>
 
-<dialog id="account-dialog" class="account-dialog">
-  <form id="account-form" autocomplete="off">
+<dialog id="account-dialog" class="account-dialog" data-oauth-enabled="{{.CloudflareOAuthEnabled}}">
+  <div class="account-onboarding-shell">
     <div class="dialog-heading">
-      <span class="section-index">SECURE ONBOARDING</span>
+      <span class="section-index">IDENTITY PASSPORT / SECURE ONBOARDING</span>
       <h2>接入 Cloudflare R2</h2>
-      <p>凭据和代理认证信息会先加密再写入数据库。验证成功后立即加入调度，无需重启。</p>
+      <p>一个 CF 登录身份对应一个隔离浏览器 Profile 与固定代理出口；授权后自动发现账号与 Bucket。</p>
     </div>
-    <div class="account-form-grid">
+    <div class="onboarding-tabs" role="tablist" aria-label="Cloudflare 接入方式">
+      {{if .CloudflareOAuthEnabled}}<button id="oauth-tab" type="button" class="onboarding-tab active" role="tab" aria-selected="true" data-panel="oauth-panel">快速登录授权 <span>推荐</span></button>{{end}}
+      <button id="manual-tab" type="button" class="onboarding-tab{{if not .CloudflareOAuthEnabled}} active{{end}}" role="tab" aria-selected="{{if .CloudflareOAuthEnabled}}false{{else}}true{{end}}" data-panel="manual-panel">手动凭据</button>
+    </div>
+
+    {{if .CloudflareOAuthEnabled}}
+    <section id="oauth-panel" class="onboarding-panel active" role="tabpanel">
+      <div class="oauth-identity-band">
+        <div class="oauth-identity-mark">CF</div>
+        <div><b>隔离身份通道</b><span>登录 Cookie 只保存在本机独立 Profile；代理认证不会写入浏览器目录。</span></div>
+        <a class="connector-download" href="connector/download">下载 Connector</a>
+      </div>
+      <form id="oauth-start-form" autocomplete="off">
+        <input id="oauth-existing-account" name="account_id" type="hidden">
+        <div class="account-form-grid oauth-start-grid">
+          <label>身份备注<input id="oauth-identity-label" name="identity_label" type="text" maxlength="80" placeholder="例如：海外团队账号" required></label>
+          <label>固定代理出口（可选）<input id="oauth-proxy-url" name="proxy_url" type="text" spellcheck="false" placeholder="http://user:pass@203.0.113.10:8080"><small>支持 HTTP / HTTPS / SOCKS5；配置后登录与服务端 CF API 使用同一出口，失败不会回退直连。</small></label>
+        </div>
+        <div class="oauth-flow-actions">
+          <button id="oauth-start" type="submit" class="btn-primary">创建隔离登录</button>
+          <span>首次使用请先下载并安装 Connector（当前 Windows 用户，无需管理员权限）。</span>
+        </div>
+      </form>
+
+      <div id="oauth-session" class="oauth-session" hidden>
+        <div class="oauth-session-head">
+          <div><span>LOCAL PROFILE</span><code id="oauth-profile-id"></code></div>
+          <span id="oauth-session-state" class="oauth-state">等待启动</span>
+        </div>
+        <div class="oauth-route-line"><i></i><span id="oauth-route-label">正在准备安全通道…</span><i></i></div>
+        <button id="oauth-launch" type="button" class="oauth-launch">打开隔离 Cloudflare 登录 <b>↗</b></button>
+        <p class="oauth-launch-help">浏览器询问是否打开 S3 Center Connector 时请选择允许。完成 Cloudflare 授权后回到这里。</p>
+      </div>
+
+      <form id="oauth-complete-form" class="oauth-complete" autocomplete="off" hidden>
+        <div class="oauth-ready"><span>DISCOVERY COMPLETE</span><strong>已读取可访问的 R2 Bucket</strong></div>
+        <div class="account-form-grid">
+          <label>Cloudflare Account<select id="oauth-account" name="account_id" required></select></label>
+          <label>R2 Bucket<select id="oauth-bucket" name="bucket" required></select></label>
+          <label>Backend 名称（可选）<input id="oauth-backend-name" name="backend_name" type="text" maxlength="63" placeholder="自动生成"></label>
+          <label class="range-label">免费额度预警线 <output id="oauth-warning-output">80%</output><input id="oauth-warning-percent" name="warning_percent" type="range" min="50" max="95" value="80"></label>
+        </div>
+        <div class="account-security-note"><b>最小权限自动落地</b><span>S3 Center 会创建仅限所选 Bucket 的 R2 Token；OAuth 临时 Token 只留在内存，完成后立即清除。</span></div>
+        <div class="oauth-flow-actions"><button id="oauth-complete" type="submit" class="btn-primary">创建凭据并接入</button><span>每次接入一个 Bucket，可用同一 Profile 再次授权添加。</span></div>
+      </form>
+      <p id="oauth-status" class="account-add-status" role="status"></p>
+    </section>
+    {{end}}
+
+    <section id="manual-panel" class="onboarding-panel{{if not .CloudflareOAuthEnabled}} active{{end}}" role="tabpanel">
+    <form id="account-form" autocomplete="off">
+      <div class="account-form-grid">
       <label>Backend 名称<input name="name" type="text" maxlength="63" placeholder="r2-account-02" required></label>
       <label>账号备注<input name="account_label" type="text" maxlength="80" placeholder="团队备用账号"></label>
       <label class="span-2">Cloudflare Account ID<input name="account_id" type="text" minlength="32" maxlength="32" spellcheck="false" placeholder="32 位 Account ID" required></label>
@@ -530,14 +585,14 @@
       <label class="span-2">R2 Secret Access Key<input name="secret_access_key" type="password" spellcheck="false" required></label>
       <label class="span-2">出口代理（可选）<input name="proxy_url" type="text" spellcheck="false" placeholder="http://user:pass@203.0.113.10:8080 或 socks5://..."><small>未写协议时按 HTTP；代理只作用于该账号的服务端 R2 请求。</small></label>
       <label class="span-2 range-label">免费额度预警线 <output id="warning-output">80%</output><input name="warning_percent" id="warning-percent" type="range" min="50" max="95" value="80"></label>
-    </div>
-    <div class="account-security-note"><b>接入前准备</b><span>请在 Cloudflare R2 创建仅限目标 Bucket 的 Object Read &amp; Write Token。这里需要的是 R2 Access Key ID / Secret，不是普通 Cloudflare API Token。</span></div>
-    <p id="account-add-status" class="account-add-status" role="status"></p>
-    <div class="dialog-actions">
-      <button id="account-cancel" type="button">取消</button>
-      <button id="account-submit" type="submit" class="btn-primary">验证并接入</button>
-    </div>
-  </form>
+      </div>
+      <div class="account-security-note"><b>手动模式</b><span>请创建仅限目标 Bucket 的 Object Read &amp; Write Token。这里填写 R2 Access Key ID / Secret，不是普通 Cloudflare API Token。</span></div>
+      <p id="account-add-status" class="account-add-status" role="status"></p>
+      <div class="dialog-actions"><button id="account-submit" type="submit" class="btn-primary">验证并接入</button></div>
+    </form>
+    </section>
+    <div class="dialog-actions onboarding-close-row"><button id="account-cancel" type="button">关闭</button></div>
+  </div>
 </dialog>
 
 <dialog id="upload-dialog">
