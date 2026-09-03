@@ -121,12 +121,12 @@
           <span>{{.Proxy}}</span>
           <span>{{len .Backends}} backend · {{range $i, $b := .Buckets}}{{if $i}}, {{end}}{{$b}}{{end}}</span>
           {{if .Managed}}<span class="cf-managed">动态托管</span>{{end}}
-          {{if eq .AuthMode "cloudflare_oauth"}}<span class="cf-oauth-badge">OAUTH PROFILE · {{.ProfileID}}</span>{{end}}
+          {{if .AuthMode}}<span class="cf-oauth-badge">ISOLATED PROFILE · {{.ProfileID}}</span>{{end}}
         </div>
         <div class="cf-account-controls">
           <a class="cf-card-action" href="#object-browser">管理存储内容</a>
-          {{if and $.CloudflareOAuthEnabled (eq .AuthMode "cloudflare_oauth")}}
-          <button type="button" class="cf-card-action cf-oauth-reauthorize" data-account-id="{{.AccountID}}" data-account-label="{{.Label}}">授权 / 添加 Bucket</button>
+          {{if and $.CloudflareOAuthEnabled .Managed}}
+          <button type="button" class="cf-card-action cf-oauth-reauthorize" data-account-id="{{.AccountID}}" data-account-label="{{.Label}}">登录 / 添加 Bucket</button>
           {{end}}
           {{if .ProxyEditable}}
           <button type="button" class="cf-card-action cf-proxy-edit" data-account-id="{{.AccountID}}" data-account-label="{{.Label}}" data-current-proxy="{{.Proxy}}">设置 API 代理</button>
@@ -515,10 +515,10 @@
     <div class="dialog-heading">
       <span class="section-index">IDENTITY PASSPORT / SECURE ONBOARDING</span>
       <h2>接入 Cloudflare R2</h2>
-      <p>一个 CF 登录身份对应一个隔离浏览器 Profile 与固定代理出口；授权后自动发现账号与 Bucket。</p>
+      <p>一个 CF 登录身份对应一个隔离浏览器 Profile 与固定代理出口；登录后由官方预填页面创建一次性引导 Token，自动发现账号与 Bucket。</p>
     </div>
     <div class="onboarding-tabs" role="tablist" aria-label="Cloudflare 接入方式">
-      {{if .CloudflareOAuthEnabled}}<button id="oauth-tab" type="button" class="onboarding-tab active" role="tab" aria-selected="true" data-panel="oauth-panel">快速登录授权 <span>推荐</span></button>{{end}}
+      {{if .CloudflareOAuthEnabled}}<button id="oauth-tab" type="button" class="onboarding-tab active" role="tab" aria-selected="true" data-panel="oauth-panel">快速隔离登录 <span>推荐</span></button>{{end}}
       <button id="manual-tab" type="button" class="onboarding-tab{{if not .CloudflareOAuthEnabled}} active{{end}}" role="tab" aria-selected="{{if .CloudflareOAuthEnabled}}false{{else}}true{{end}}" data-panel="manual-panel">手动凭据</button>
     </div>
 
@@ -548,7 +548,7 @@
         </div>
         <div class="oauth-route-line"><i></i><span id="oauth-route-label">正在准备安全通道…</span><i></i></div>
         <button id="oauth-launch" type="button" class="oauth-launch">打开隔离 Cloudflare 登录 <b>↗</b></button>
-        <p class="oauth-launch-help">浏览器询问是否打开 S3 Center Connector 时请选择允许。完成 Cloudflare 授权后回到这里。</p>
+        <p class="oauth-launch-help">浏览器询问是否打开 S3 Center Connector 时请选择允许；在 Cloudflare 官方预填页面确认创建临时 Token，再用页面右下角面板安全导入。</p>
       </div>
 
       <form id="oauth-complete-form" class="oauth-complete" autocomplete="off" hidden>
@@ -559,8 +559,8 @@
           <label>Backend 名称（可选）<input id="oauth-backend-name" name="backend_name" type="text" maxlength="63" placeholder="自动生成"></label>
           <label class="range-label">免费额度预警线 <output id="oauth-warning-output">80%</output><input id="oauth-warning-percent" name="warning_percent" type="range" min="50" max="95" value="80"></label>
         </div>
-        <div class="account-security-note"><b>最小权限自动落地</b><span>S3 Center 会创建仅限所选 Bucket 的 R2 Token；OAuth 临时 Token 只留在内存，完成后立即清除。</span></div>
-        <div class="oauth-flow-actions"><button id="oauth-complete" type="submit" class="btn-primary">创建凭据并接入</button><span>每次接入一个 Bucket，可用同一 Profile 再次授权添加。</span></div>
+        <div class="account-security-note"><b>最小权限自动落地</b><span>S3 Center 会创建仅限所选 Bucket 的 R2 Token；临时引导 Token 只留在内存，完成后通过 Cloudflare API 自动撤销。</span></div>
+        <div class="oauth-flow-actions"><button id="oauth-complete" type="submit" class="btn-primary">创建桶级凭据并接入</button><span>每次接入一个 Bucket，可用同一 Profile 再次登录添加。</span></div>
       </form>
       <p id="oauth-status" class="account-add-status" role="status"></p>
     </section>

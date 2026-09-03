@@ -139,8 +139,8 @@
         oauthSessionBox.hidden = false;
         oauthLaunchButton.disabled = false;
         oauthSessionState.textContent = '通道已创建';
-        oauthRouteLabel.textContent = body.session.proxy + ' → Cloudflare OAuth';
-        setStatus(oauthStatus, 'success', '通道有效期至 ' + new Date(body.session.expires_at).toLocaleTimeString() + '。点击上方按钮打开隔离登录。');
+        oauthRouteLabel.textContent = body.session.proxy + ' → Cloudflare Token Wizard';
+        setStatus(oauthStatus, 'success', '通道有效期至 ' + new Date(body.session.expires_at).toLocaleTimeString() + '。点击上方按钮打开隔离登录与官方预填 Token 页面。');
         oauthSessionBox.scrollIntoView({behavior: 'smooth', block: 'nearest'});
         schedulePoll(1200);
       }).catch(function (error) {
@@ -158,10 +158,13 @@
         session_id: oauthSessionID, account_id: oauthAccount.value, bucket: oauthBucket.value,
         backend_name: document.getElementById('oauth-backend-name').value,
         warning_percent: Number(oauthWarning.value)
-      }).then(function () {
-        setStatus(oauthStatus, 'success', '凭据已加密保存，Bucket 已加入调度。正在刷新…');
+      }).then(function (body) {
+        const message = body.warning
+          ? 'Bucket 已接入，但临时引导 Token 自动撤销失败，请立即在 Cloudflare 中手动撤销。'
+          : '凭据已加密保存，临时引导 Token 已撤销，Bucket 已加入调度。正在刷新…';
+        setStatus(oauthStatus, body.warning ? 'error' : 'success', message);
         window.clearTimeout(pollTimer);
-        setTimeout(function () { location.reload(); }, 850);
+        setTimeout(function () { location.reload(); }, body.warning ? 5000 : 850);
       }).catch(function (error) {
         setStatus(oauthStatus, 'error', error.message);
         oauthCompleteButton.disabled = false;
@@ -178,7 +181,7 @@
       oauthProxyURL.value = '';
       oauthProxyURL.disabled = true;
       oauthProxyURL.placeholder = '沿用账号已加密保存的代理；如需修改请先使用卡片上的代理设置';
-      oauthStartButton.textContent = '重新授权 / 发现 Bucket';
+      oauthStartButton.textContent = '重新登录 / 添加 Bucket';
       selectTab('oauth-panel');
       dialog.showModal();
       dialog.scrollTop = 0;
@@ -219,17 +222,17 @@
 
   function updateOAuthState(session) {
     const labels = {
-      waiting_connector: '等待 Connector', opening_browser: '启动浏览器', waiting_authorization: '等待授权',
-      discovering: '发现资源', authorized: '授权完成', provisioning: '创建凭据', complete: '接入完成', error: '发生错误'
+      waiting_connector: '等待 Connector', opening_browser: '启动浏览器', waiting_authorization: '等待引导 Token',
+      discovering: '验证并发现资源', authorized: '引导完成', provisioning: '创建凭据', complete: '接入完成', error: '发生错误'
     };
     oauthSessionState.textContent = labels[session.status] || session.status;
-    if (session.exit_ip) oauthRouteLabel.textContent = session.proxy + ' · EXIT ' + session.exit_ip + ' → Cloudflare OAuth';
+    if (session.exit_ip) oauthRouteLabel.textContent = session.proxy + ' · EXIT ' + session.exit_ip + ' → Cloudflare Token Wizard';
     if (session.status === 'error') {
       setStatus(oauthStatus, 'error', session.error || '授权失败，请重试。');
       return;
     }
-    if (session.status === 'waiting_authorization') setStatus(oauthStatus, 'checking', '隔离浏览器出口验证成功，请在新窗口完成 Cloudflare 授权。');
-    if (session.status === 'discovering') setStatus(oauthStatus, 'checking', '授权成功，正在读取账号与 R2 Bucket…');
+    if (session.status === 'waiting_authorization') setStatus(oauthStatus, 'checking', session.error || '隔离浏览器出口验证成功，请在 Cloudflare 官方页面创建临时引导 Token，并用右下角面板安全导入。');
+    if (session.status === 'discovering') setStatus(oauthStatus, 'checking', '正在经同一代理验证引导 Token，并读取账号与 R2 Bucket…');
     if (session.status === 'authorized') {
       discoveredAccounts = session.accounts || [];
       renderAccounts();
@@ -303,7 +306,7 @@
     postJSON('api/r2-account-proxy', {account_id: proxyAccountID.value, proxy_url: proxyURL.value})
       .then(function (body) {
         const count = Array.isArray(body.accounts) ? body.accounts.length : 0;
-        setStatus(proxyStatus, 'success', '验证通过，已热切换 ' + count + ' 个 Backend。OAuth 账号会使用新的隔离 Profile。');
+        setStatus(proxyStatus, 'success', '验证通过，已热切换 ' + count + ' 个 Backend。浏览器接入账号会使用新的隔离 Profile。');
         setTimeout(function () { location.reload(); }, 900);
       }).catch(function (error) {
         setStatus(proxyStatus, 'error', error.message);

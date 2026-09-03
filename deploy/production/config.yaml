@@ -91,16 +91,9 @@ managed_backends:
 
 cloudflare_oauth:
   enabled: ${CF_OAUTH_ENABLED}
-  client_id: "${CF_OAUTH_CLIENT_ID}"
-  client_secret: "${CF_OAUTH_CLIENT_SECRET}"
-  redirect_url: "https://s3-center.aiid.qzz.io/ui/oauth/cloudflare/callback"
-  scopes:
-    - "${CF_OAUTH_SCOPE_ACCOUNT_READ}"
-    - "${CF_OAUTH_SCOPE_R2_READ}"
-    - "${CF_OAUTH_SCOPE_TOKEN_WRITE}"
+  redirect_url: "https://s3-center.aiid.qzz.io/ui/"
   session_ttl: "20m"
   connector_scheme: s3center
-  token_endpoint_auth_method: client_secret_basic
 
 cleanup_queue:
   concurrency: 4

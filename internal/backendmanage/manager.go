@@ -43,7 +43,7 @@ type Definition struct {
 }
 
 // Connection identifies the local browser identity used to authorize an R2
-// backend. It deliberately contains no browser cookies or OAuth tokens.
+// backend. It deliberately contains no browser cookies or bootstrap tokens.
 type Connection struct {
 	IdentityID   string    `json:"identity_id"`
 	ProfileID    string    `json:"profile_id"`
@@ -52,7 +52,7 @@ type Connection struct {
 }
 
 // AccountConnection is the internal account context used to start a fresh
-// OAuth authorization through the same proxy and isolated browser profile.
+// browser authorization through the same proxy and isolated browser profile.
 type AccountConnection struct {
 	AccountID    string
 	AccountLabel string
@@ -232,10 +232,10 @@ func (m *Manager) Create(ctx context.Context, request *CreateRequest) (View, err
 }
 
 // CreateProvisioned registers a backend whose bucket-scoped credentials were
-// created during a Cloudflare OAuth session.
+// created during a browser-assisted Cloudflare onboarding session.
 func (m *Manager) CreateProvisioned(ctx context.Context, request *CreateRequest, connection Connection) (View, error) {
-	if connection.IdentityID == "" || connection.ProfileID == "" || connection.AuthMode != "cloudflare_oauth" {
-		return View{}, errors.New("invalid Cloudflare OAuth connection metadata")
+	if connection.IdentityID == "" || connection.ProfileID == "" || !isCloudflareConnectorAuth(connection.AuthMode) {
+		return View{}, errors.New("invalid Cloudflare connector metadata")
 	}
 	return m.create(ctx, request, &connection)
 }
@@ -301,7 +301,8 @@ func (m *Manager) create(ctx context.Context, request *CreateRequest, connection
 }
 
 // ConnectionForAccount returns the encrypted-definition fields needed to
-// relaunch OAuth for an existing account. Callers must not expose ProxyURL.
+// relaunch the isolated connector for an existing account. Callers must not
+// expose ProxyURL.
 func (m *Manager) ConnectionForAccount(accountID string) (AccountConnection, error) {
 	accountID = strings.ToLower(strings.TrimSpace(accountID))
 	if !accountIDPattern.MatchString(accountID) {
@@ -333,15 +334,19 @@ func (m *Manager) ConnectionForAccount(accountID string) (AccountConnection, err
 }
 
 func preferAccountConnection(candidate, current *Definition) bool {
-	candidateOAuth := candidate.Connection != nil && candidate.Connection.AuthMode == "cloudflare_oauth"
-	currentOAuth := current.Connection != nil && current.Connection.AuthMode == "cloudflare_oauth"
-	if candidateOAuth != currentOAuth {
-		return candidateOAuth
+	candidateConnector := candidate.Connection != nil && isCloudflareConnectorAuth(candidate.Connection.AuthMode)
+	currentConnector := current.Connection != nil && isCloudflareConnectorAuth(current.Connection.AuthMode)
+	if candidateConnector != currentConnector {
+		return candidateConnector
 	}
-	if candidateOAuth && !candidate.Connection.AuthorizedAt.Equal(current.Connection.AuthorizedAt) {
+	if candidateConnector && !candidate.Connection.AuthorizedAt.Equal(current.Connection.AuthorizedAt) {
 		return candidate.Connection.AuthorizedAt.After(current.Connection.AuthorizedAt)
 	}
 	return candidate.Backend.Name < current.Backend.Name
+}
+
+func isCloudflareConnectorAuth(mode string) bool {
+	return mode == "cloudflare_connector" || mode == "cloudflare_oauth"
 }
 
 // UpdateAccountProxy validates a candidate egress against every bucket in the

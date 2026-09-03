@@ -184,18 +184,16 @@ jobs:
             fi
           done
 
-      - name: Provision public Cloudflare OAuth client
+      - name: Enable isolated Cloudflare connector
         shell: bash
         env:
-          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
-          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
           DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
           DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
         run: bash deploy/production/provision-cloudflare-oauth.sh
 
-      - name: Reload OAuth configuration and verify
+      - name: Reload connector configuration and verify
         shell: bash
         env:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}

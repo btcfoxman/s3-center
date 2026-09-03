@@ -217,9 +217,11 @@ backup
 
 而不是自动注册新账号。
 
-## 方案一：Cloudflare OAuth 接入
+## 方案一：Cloudflare OAuth 接入（只读发现 / 未来扩展）
 
 Cloudflare 在 2026 年已经开放自管理第三方 OAuth 客户端，Free、Pro、Business 和 Enterprise 都可使用。用户授权时可以选择允许你的应用访问哪些 Cloudflare Account，以及授予哪些权限。([Cloudflare Docs][3])
+
+> 2026-09 落地校正：Cloudflare 当前公共 OAuth scope 目录不暴露 `Account API Tokens Write`，因此 OAuth 可以做账号/R2 发现，却不能完成“自动生成长期 Bucket S3 凭据”的闭环。当前生产实现不把 OAuth 当作快速接入主链路，也不要求 Cloudflare Access；主链路改用下述隔离浏览器引导 Token。
 
 接入流程可以是：
 
@@ -272,7 +274,21 @@ API Tokens Write
 
 OAuth 是控制面凭证，不一定直接适合作为 S3 数据面凭证。
 
-## 方案二：单独接入 R2 Bucket Token
+## 方案二：隔离浏览器 + 一次性引导 Token（当前实现）
+
+Connector 为每个 Cloudflare 身份固定绑定本机独立 Profile 和可选代理，打开 Cloudflare 官方预填的 Account API Token 页面。管理员只需登录、确认并把一次性 Token 粘贴到页面内嵌的安全导入面板。服务端随后经同一代理完成：
+
+```text
+验证引导 Token
+→ 发现 Account / R2 Bucket
+→ 创建仅限所选 Bucket 的 Account-owned R2 Token
+→ HeadBucket 验证并加密落库
+→ 撤销引导 Token
+```
+
+引导 Token 只驻留短期内存，不进入数据库和日志；登录 Cookie 只在本机 Profile。若创建后端失败，刚生成的 Bucket Token 会被撤销，引导 Token 在会话内保留以便重试。
+
+## 方案三：单独接入 R2 Bucket Token
 
 数据面建议每个节点单独创建一个 Bucket 范围的 R2 Token：
 

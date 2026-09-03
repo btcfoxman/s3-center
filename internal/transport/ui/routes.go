@@ -102,7 +102,6 @@ func (h *Handler) Register(mux *http.ServeMux, prefix string) {
 	h.prefix = prefix
 	mux.HandleFunc(prefix+loginPath, h.handleLogin)
 	mux.HandleFunc(prefix+"/logout", h.handleLogout)
-	mux.HandleFunc(prefix+"/oauth/cloudflare/callback", h.handleCloudflareOAuthCallback)
 	mux.HandleFunc(prefix+"/oauth/cloudflare/info", h.handleCloudflareOAuthInfo)
 	mux.HandleFunc(prefix+"/connector/cloudflare/session", h.handleCloudflareConnectorSession)
 	mux.HandleFunc(prefix+"/connector/cloudflare/report", h.handleCloudflareConnectorReport)

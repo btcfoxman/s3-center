@@ -1,11 +1,11 @@
-// Package cloudflareonboard implements short-lived Cloudflare OAuth sessions
-// that discover R2 buckets and mint least-privilege S3 credentials.
+// Package cloudflareonboard implements short-lived, browser-assisted
+// Cloudflare sessions that discover R2 buckets and mint least-privilege S3
+// credentials through an isolated local browser profile.
 package cloudflareonboard
 
 import (
 	"context"
 	"crypto/rand"
-	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
@@ -24,14 +24,19 @@ import (
 )
 
 const (
-	defaultAuthorizationURL = "https://dash.cloudflare.com/oauth2/auth"
-	defaultTokenURL         = "https://dash.cloudflare.com/oauth2/token" //nolint:gosec // Public OAuth endpoint, not a credential.
+	defaultAuthorizationURL = "https://dash.cloudflare.com/"
 	defaultAPIBaseURL       = "https://api.cloudflare.com/client/v4"
+	bootstrapCredentialName = "S3 Center temporary onboarding" //nolint:gosec // Public display label, not a credential.
+	bootstrapPermissions    = `[{"key":"account_api_tokens","type":"edit"},{"key":"account_settings","type":"read"},{"key":"workers_r2","type":"edit"}]`
 )
 
-var profileIDPattern = regexp.MustCompile(`^cf-[a-f0-9]{16}$`)
+var (
+	profileIDPattern           = regexp.MustCompile(`^cf-[a-f0-9]{16}$`)
+	cloudflareAccountIDPattern = regexp.MustCompile(`^[a-f0-9]{32}$`)
+)
 
-// BackendManager is the runtime-backend surface needed after OAuth succeeds.
+// BackendManager is the runtime-backend surface needed after browser-assisted
+// authorization succeeds.
 type BackendManager interface {
 	CreateProvisioned(context.Context, *backendmanage.CreateRequest, backendmanage.Connection) (backendmanage.View, error)
 	ConnectionForAccount(string) (backendmanage.AccountConnection, error)
@@ -43,34 +48,30 @@ type Options struct {
 	Config           config.CloudflareOAuthConfig
 	Backends         BackendManager
 	AuthorizationURL string
-	TokenURL         string
 	APIBaseURL       string
 	Now              func() time.Time
 	HTTPClient       func(proxyURL string) *http.Client
 }
 
-// Service owns in-memory, expiring onboarding sessions. OAuth credentials are
-// never persisted: after provisioning, only the generated bucket R2 credential
-// is retained by backendmanage in its encrypted definition.
+// Service owns in-memory, expiring onboarding sessions. Bootstrap credentials
+// are never persisted: after provisioning, only the generated bucket R2
+// credential is retained by backendmanage in its encrypted definition.
 type Service struct {
 	cfg              config.CloudflareOAuthConfig
 	backends         BackendManager
 	authorizationURL string
-	tokenURL         string
 	apiBaseURL       string
 	now              func() time.Time
 	httpClient       func(string) *http.Client
 
 	mu           sync.Mutex
 	sessions     map[string]*session
-	states       map[string]string
 	tickets      map[string]string
 	reportTokens map[string]string
 }
 
 type session struct {
 	ID                string
-	State             string
 	Ticket            string
 	ReportToken       string
 	IdentityID        string
@@ -78,13 +79,15 @@ type session struct {
 	IdentityLabel     string
 	ProxyURL          string
 	ExpectedAccountID string
-	CodeVerifier      string
 	AuthorizationURL  string
 	Status            string
 	ExitIP            string
 	LastError         string
 	Accounts          []Account
 	AccessToken       string
+	BootstrapTokenID  string
+	BootstrapOwner    string
+	BootstrapAccount  string
 	CreatedAt         time.Time
 	ExpiresAt         time.Time
 	Result            *backendmanage.View
@@ -119,15 +122,20 @@ type ConnectorPayload struct {
 	ReportURL        string `json:"report_url,omitempty"`
 }
 
-// ConnectorReport is the narrow status surface accepted from the local agent.
+// ConnectorReport is the narrow status and one-time secret surface accepted
+// from the local agent. BootstrapToken is consumed into server memory only and
+// never included in a SessionView or log record.
 type ConnectorReport struct {
-	Token  string `json:"token"`
-	Status string `json:"status"`
-	ExitIP string `json:"exit_ip"`
-	Error  string `json:"error"`
+	Token          string `json:"token"`
+	Status         string `json:"status"`
+	ExitIP         string `json:"exit_ip"`
+	Error          string `json:"error"`
+	AccountID      string `json:"account_id,omitempty"`
+	BootstrapToken string `json:"bootstrap_token,omitempty"`
 }
 
-// Bucket is a selectable R2 bucket discovered with the OAuth access token.
+// Bucket is a selectable R2 bucket discovered with the one-time bootstrap
+// token.
 type Bucket struct {
 	Name         string `json:"name"`
 	Jurisdiction string `json:"jurisdiction"`
@@ -167,7 +175,7 @@ type CompleteRequest struct {
 	WarningPercent int    `json:"warning_percent"`
 }
 
-// New constructs an OAuth onboarding service.
+// New constructs a browser-assisted onboarding service.
 func New(options *Options) (*Service, error) {
 	if options == nil {
 		return nil, errors.New("cloudflare onboarding options are required")
@@ -186,11 +194,10 @@ func New(options *Options) (*Service, error) {
 	return &Service{
 		cfg: options.Config, backends: options.Backends,
 		authorizationURL: firstNonEmpty(options.AuthorizationURL, defaultAuthorizationURL),
-		tokenURL:         firstNonEmpty(options.TokenURL, defaultTokenURL),
 		apiBaseURL:       strings.TrimRight(firstNonEmpty(options.APIBaseURL, defaultAPIBaseURL), "/"),
 		now:              now, httpClient: httpClient,
-		sessions: make(map[string]*session), states: make(map[string]string),
-		tickets: make(map[string]string), reportTokens: make(map[string]string),
+		sessions: make(map[string]*session),
+		tickets:  make(map[string]string), reportTokens: make(map[string]string),
 	}, nil
 }
 
@@ -201,22 +208,23 @@ func firstNonEmpty(value, fallback string) string {
 	return fallback
 }
 
-// Enabled reports whether the server has a configured Cloudflare OAuth client.
+// Enabled reports whether browser-assisted Cloudflare onboarding is enabled.
 func (s *Service) Enabled() bool { return s != nil && s.cfg.Enabled }
 
 // ConnectorScheme returns the registered local URI scheme.
 func (s *Service) ConnectorScheme() string { return s.cfg.ConnectorScheme }
 
-// RedirectURL returns the trusted public callback URL used to derive connector
-// endpoints without trusting an inbound Host header.
-func (s *Service) RedirectURL() string { return s.cfg.RedirectURL }
+// PublicURL returns the trusted public base used to derive connector endpoints
+// without trusting an inbound Host header. Its config field retains the legacy
+// redirect_url name for deployment compatibility.
+func (s *Service) PublicURL() string { return s.cfg.RedirectURL }
 
-// Start creates an expiring OAuth authorization session.
+// Start creates an expiring browser-assisted authorization session.
 //
 //nolint:gocognit // Session setup intentionally keeps validation and secret generation in one fail-closed transaction.
 func (s *Service) Start(_ context.Context, request StartRequest) (StartResult, error) {
 	if !s.Enabled() {
-		return StartResult{}, errors.New("cloudflare OAuth onboarding is disabled")
+		return StartResult{}, errors.New("cloudflare browser onboarding is disabled")
 	}
 	now := s.now()
 	s.mu.Lock()
@@ -266,10 +274,6 @@ func (s *Service) Start(_ context.Context, request StartRequest) (StartResult, e
 	if err != nil {
 		return StartResult{}, err
 	}
-	state, err := randomToken(32)
-	if err != nil {
-		return StartResult{}, err
-	}
 	ticket, err := randomToken(32)
 	if err != nil {
 		return StartResult{}, err
@@ -278,24 +282,19 @@ func (s *Service) Start(_ context.Context, request StartRequest) (StartResult, e
 	if err != nil {
 		return StartResult{}, err
 	}
-	verifier, err := randomToken(48)
-	if err != nil {
-		return StartResult{}, err
-	}
-	authorizationURL, err := s.buildAuthorizationURL(state, verifier)
+	authorizationURL, err := s.buildAuthorizationURL(expectedAccountID)
 	if err != nil {
 		return StartResult{}, err
 	}
 	item := &session{
-		ID: id, State: state, Ticket: ticket, ReportToken: reportToken,
+		ID: id, Ticket: ticket, ReportToken: reportToken,
 		IdentityID: identityID, ProfileID: profileID, IdentityLabel: request.IdentityLabel,
 		ProxyURL: request.ProxyURL, ExpectedAccountID: expectedAccountID,
-		CodeVerifier: verifier, AuthorizationURL: authorizationURL,
-		Status: "waiting_connector", CreatedAt: now, ExpiresAt: now.Add(s.cfg.SessionTTL),
+		AuthorizationURL: authorizationURL,
+		Status:           "waiting_connector", CreatedAt: now, ExpiresAt: now.Add(s.cfg.SessionTTL),
 	}
 	s.mu.Lock()
 	s.sessions[id] = item
-	s.states[state] = id
 	s.tickets[ticket] = id
 	s.reportTokens[reportToken] = id
 	view := viewOfSession(item)
@@ -303,20 +302,19 @@ func (s *Service) Start(_ context.Context, request StartRequest) (StartResult, e
 	return StartResult{Session: view, AuthorizationURL: authorizationURL, ConnectorTicket: ticket}, nil
 }
 
-func (s *Service) buildAuthorizationURL(state, verifier string) (string, error) {
+func (s *Service) buildAuthorizationURL(accountID string) (string, error) {
 	authorize, err := url.Parse(s.authorizationURL)
 	if err != nil {
 		return "", fmt.Errorf("parse Cloudflare authorization URL: %w", err)
 	}
-	challenge := sha256.Sum256([]byte(verifier))
 	query := authorize.Query()
-	query.Set("client_id", s.cfg.ClientID)
-	query.Set("redirect_uri", s.cfg.RedirectURL)
-	query.Set("response_type", "code")
-	query.Set("scope", strings.Join(s.cfg.Scopes, " "))
-	query.Set("state", state)
-	query.Set("code_challenge_method", "S256")
-	query.Set("code_challenge", base64.RawURLEncoding.EncodeToString(challenge[:]))
+	accountPath := "/:account/api-tokens"
+	if accountID != "" {
+		accountPath = "/" + accountID + "/api-tokens"
+	}
+	query.Set("to", accountPath)
+	query.Set("permissionGroupKeys", bootstrapPermissions)
+	query.Set("name", bootstrapCredentialName)
 	authorize.RawQuery = query.Encode()
 	return authorize.String(), nil
 }
@@ -343,40 +341,117 @@ func (s *Service) ConsumeConnectorTicket(ticket string) (ConnectorPayload, error
 	}, nil
 }
 
-// ReportConnector records fail-closed proxy validation and browser startup.
-func (s *Service) ReportConnector(report ConnectorReport) error {
+// ReportConnector records fail-closed proxy validation and browser startup,
+// then consumes the one-time bootstrap token supplied from the isolated local
+// browser. Network discovery always uses the exact same configured proxy.
+//
+//nolint:gocognit // The guarded report transitions form one fail-closed state machine and are clearer together.
+func (s *Service) ReportConnector(ctx context.Context, report *ConnectorReport) error {
+	if report == nil {
+		return errors.New("connector report is required")
+	}
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.cleanupLocked(s.now())
 	id, ok := s.reportTokens[report.Token]
 	if !ok {
+		s.mu.Unlock()
 		return errors.New("connector report token is invalid or expired")
 	}
 	item := s.sessions[id]
 	if item == nil {
+		s.mu.Unlock()
 		return errors.New("connector session no longer exists")
 	}
 	if item.Status != "waiting_connector" && item.Status != "opening_browser" && item.Status != "waiting_authorization" {
+		s.mu.Unlock()
 		return errors.New("connector session no longer accepts browser reports")
 	}
 	if report.Error != "" {
 		item.Status = "error"
 		item.LastError = truncate(strings.TrimSpace(report.Error), 300)
+		s.mu.Unlock()
 		return nil
-	}
-	switch report.Status {
-	case "proxy_verified", "browser_open":
-		item.Status = "waiting_authorization"
-	default:
-		return errors.New("unsupported connector status")
 	}
 	if report.ExitIP != "" {
 		if net.ParseIP(strings.TrimSpace(report.ExitIP)) == nil {
+			s.mu.Unlock()
 			return errors.New("connector exit_ip is invalid")
 		}
 		item.ExitIP = strings.TrimSpace(report.ExitIP)
 	}
+	if report.Status == "proxy_verified" || report.Status == "browser_open" {
+		item.Status = "waiting_authorization"
+		s.mu.Unlock()
+		return nil
+	}
+	if report.Status != "bootstrap_token" {
+		s.mu.Unlock()
+		return errors.New("unsupported connector status")
+	}
+	bootstrapToken, err := validateBootstrapToken(report.BootstrapToken)
+	if err != nil {
+		s.mu.Unlock()
+		return err
+	}
+	accountID := strings.ToLower(strings.TrimSpace(report.AccountID))
+	if !cloudflareAccountIDPattern.MatchString(accountID) {
+		s.mu.Unlock()
+		return errors.New("cloudflare account ID is unavailable; create the token from the guided account page")
+	}
+	proxyURL := item.ProxyURL
+	expectedAccountID := item.ExpectedAccountID
+	if expectedAccountID != "" && accountID != expectedAccountID {
+		s.mu.Unlock()
+		return errors.New("the isolated Cloudflare profile selected a different account than the one being reauthorized")
+	}
+	item.Status = "discovering"
+	item.LastError = ""
+	s.mu.Unlock()
+
+	client := s.httpClient(proxyURL)
+	accounts, identity, err := s.discoverBootstrapAccount(ctx, client, bootstrapToken, accountID)
+	if err == nil && len(accounts) == 0 {
+		err = errors.New("cloudflare returned no accessible accounts")
+	}
+	if err != nil {
+		err = redactProxyError(err, proxyURL)
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	current := s.sessions[id]
+	if current == nil {
+		return errors.New("connector session no longer exists")
+	}
+	if err != nil {
+		current.Status = "waiting_authorization"
+		current.LastError = truncate(err.Error(), 300)
+		return err
+	}
+	current.AccessToken = bootstrapToken
+	current.BootstrapTokenID = identity.ID
+	current.BootstrapOwner = identity.Owner
+	current.BootstrapAccount = identity.AccountID
+	current.Accounts = accounts
+	current.Status = "authorized"
+	current.LastError = ""
+	current.ExpiresAt = s.now().Add(s.cfg.SessionTTL)
+	delete(s.reportTokens, current.ReportToken)
 	return nil
+}
+
+func validateBootstrapToken(raw string) (string, error) {
+	token := strings.TrimSpace(raw)
+	if len(token) < 20 || len(token) > 512 || strings.ContainsAny(token, " \t\r\n") {
+		return "", errors.New("cloudflare bootstrap token is invalid")
+	}
+	if strings.HasPrefix(token, "cfoat_") {
+		return "", errors.New("cloudflare OAuth access tokens cannot mint bucket credentials; use the API token shown by the guided page")
+	}
+	if !strings.HasPrefix(token, "cfat_") {
+		return "", errors.New("only a Cloudflare account API token created by the guided page can be used")
+	}
+	return token, nil
 }
 
 // Status returns the safe view polled by the administration UI.
@@ -391,85 +466,10 @@ func (s *Service) Status(id string) (SessionView, error) {
 	return viewOfSession(item), nil
 }
 
-// Authorize exchanges the callback code and discovers accessible accounts and
-// buckets through the exact proxy bound to the browser profile.
-//
-//nolint:gocognit // The callback is a linear state machine whose guarded transitions must remain visible together.
-func (s *Service) Authorize(ctx context.Context, state, code, oauthError string) error {
-	state = strings.TrimSpace(state)
-	s.mu.Lock()
-	s.cleanupLocked(s.now())
-	id := s.states[state]
-	item := s.sessions[id]
-	if item == nil {
-		s.mu.Unlock()
-		return errors.New("oauth state is invalid or expired")
-	}
-	// Authorization codes and state values are single use. A callback retry gets
-	// a fresh onboarding session instead of replaying the same grant.
-	delete(s.states, state)
-	if oauthError != "" {
-		item.Status = "error"
-		item.LastError = "Cloudflare authorization was declined: " + truncate(oauthError, 180)
-		s.mu.Unlock()
-		return errors.New(item.LastError)
-	}
-	if strings.TrimSpace(code) == "" {
-		item.Status = "error"
-		item.LastError = "Cloudflare callback did not include an authorization code"
-		s.mu.Unlock()
-		return errors.New(item.LastError)
-	}
-	proxyURL := item.ProxyURL
-	verifier := item.CodeVerifier
-	expectedAccountID := item.ExpectedAccountID
-	item.Status = "discovering"
-	s.mu.Unlock()
-
-	client := s.httpClient(proxyURL)
-	accessToken, err := s.exchangeCode(ctx, client, code, verifier)
-	if err == nil {
-		var accounts []Account
-		accounts, err = s.discoverAccounts(ctx, client, accessToken)
-		if err == nil && expectedAccountID != "" {
-			accounts = slices.DeleteFunc(accounts, func(account Account) bool { return account.ID != expectedAccountID })
-			if len(accounts) == 0 {
-				err = errors.New("the isolated Cloudflare profile is not authorized for the expected account")
-			}
-		}
-		if err == nil && len(accounts) == 0 {
-			err = errors.New("cloudflare returned no accessible accounts")
-		}
-		if err == nil {
-			s.mu.Lock()
-			if current := s.sessions[id]; current != nil {
-				current.AccessToken = accessToken
-				current.Accounts = accounts
-				current.Status = "authorized"
-				current.LastError = ""
-				current.ExpiresAt = s.now().Add(s.cfg.SessionTTL)
-				delete(s.reportTokens, current.ReportToken)
-			}
-			s.mu.Unlock()
-			return nil
-		}
-	}
-	err = redactProxyError(err, proxyURL)
-	s.mu.Lock()
-	if current := s.sessions[id]; current != nil {
-		current.Status = "error"
-		current.LastError = truncate(err.Error(), 300)
-		current.AccessToken = ""
-		delete(s.reportTokens, current.ReportToken)
-	}
-	s.mu.Unlock()
-	return err
-}
-
 // Complete mints one bucket-scoped account token and hot-adds the R2 backend.
 func (s *Service) Complete(ctx context.Context, request CompleteRequest) (backendmanage.View, error) {
 	if !s.Enabled() {
-		return backendmanage.View{}, errors.New("cloudflare OAuth onboarding is disabled")
+		return backendmanage.View{}, errors.New("cloudflare browser onboarding is disabled")
 	}
 	s.mu.Lock()
 	s.cleanupLocked(s.now())
@@ -480,7 +480,7 @@ func (s *Service) Complete(ctx context.Context, request CompleteRequest) (backen
 	}
 	if item.Status != "authorized" || item.AccessToken == "" {
 		s.mu.Unlock()
-		return backendmanage.View{}, errors.New("cloudflare authorization is not ready")
+		return backendmanage.View{}, errors.New("cloudflare bootstrap authorization is not ready")
 	}
 	account, bucket, ok := selectedBucket(item.Accounts, request.AccountID, request.Bucket)
 	if !ok {
@@ -490,6 +490,9 @@ func (s *Service) Complete(ctx context.Context, request CompleteRequest) (backen
 	accessToken := item.AccessToken
 	proxyURL := item.ProxyURL
 	identityID, profileID := item.IdentityID, item.ProfileID
+	bootstrap := bootstrapIdentity{
+		ID: item.BootstrapTokenID, Owner: item.BootstrapOwner, AccountID: item.BootstrapAccount,
+	}
 	item.Status = "provisioning"
 	item.LastError = ""
 	s.mu.Unlock()
@@ -508,14 +511,20 @@ func (s *Service) Complete(ctx context.Context, request CompleteRequest) (backen
 			ProxyURL: proxyURL, WarningPercent: request.WarningPercent,
 		}, backendmanage.Connection{
 			IdentityID: identityID, ProfileID: profileID,
-			AuthMode: "cloudflare_oauth", AuthorizedAt: s.now().UTC(),
+			AuthMode: "cloudflare_connector", AuthorizedAt: s.now().UTC(),
 		})
 		if createErr == nil {
+			revokeErr := s.deleteBootstrapToken(ctx, client, accessToken, bootstrap)
+			warning := ""
+			if revokeErr != nil {
+				warning = "Bucket is connected, but the temporary Cloudflare bootstrap token could not be revoked automatically; revoke it in Cloudflare"
+			}
 			s.mu.Lock()
 			if current := s.sessions[item.ID]; current != nil {
 				current.Status = "complete"
 				current.AccessToken = ""
-				current.CodeVerifier = ""
+				current.BootstrapTokenID = ""
+				current.LastError = warning
 				copyOfView := view
 				current.Result = &copyOfView
 				delete(s.tickets, current.Ticket)
@@ -612,7 +621,6 @@ func (s *Service) cleanupLocked(now time.Time) {
 			continue
 		}
 		delete(s.sessions, id)
-		delete(s.states, item.State)
 		delete(s.tickets, item.Ticket)
 		delete(s.reportTokens, item.ReportToken)
 	}

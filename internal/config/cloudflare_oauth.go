@@ -13,9 +13,10 @@ const defaultCloudflareOAuthSessionTTL = 20 * time.Minute
 
 var connectorSchemePattern = regexp.MustCompile(`^[a-z][a-z0-9+.-]{1,31}$`)
 
-// CloudflareOAuthConfig enables browser-authorized Cloudflare R2 onboarding.
-// The OAuth access token is kept in memory only for the short provisioning
-// session; durable object access uses a generated bucket-scoped R2 token.
+// CloudflareOAuthConfig keeps the legacy configuration key for compatibility,
+// but enables browser-assisted Cloudflare R2 onboarding. The local connector
+// obtains a short-lived bootstrap API token through Cloudflare's own dashboard;
+// durable object access uses a generated bucket-scoped R2 token.
 type CloudflareOAuthConfig struct {
 	Enabled                 bool          `yaml:"enabled"`
 	ClientID                string        `yaml:"client_id"`
@@ -49,20 +50,13 @@ func (c *CloudflareOAuthConfig) setDefaultsAndValidate() []error {
 	if !c.Enabled {
 		return errs
 	}
-	if strings.TrimSpace(c.ClientID) == "" {
-		errs = append(errs, fmt.Errorf("cloudflare_oauth.client_id is required when OAuth onboarding is enabled"))
+	if (strings.TrimSpace(c.ClientID) == "") != (strings.TrimSpace(c.ClientSecret) == "") {
+		errs = append(errs, fmt.Errorf("cloudflare_oauth.client_id and client_secret must be configured together"))
 	}
-	if strings.TrimSpace(c.ClientSecret) == "" {
-		errs = append(errs, fmt.Errorf("cloudflare_oauth.client_secret is required when OAuth onboarding is enabled"))
-	}
-	if len(c.Scopes) == 0 {
-		errs = append(errs, fmt.Errorf("cloudflare_oauth.scopes must include the scopes registered on the OAuth client"))
-	} else {
-		for _, scope := range c.Scopes {
-			if scope == "" || strings.ContainsAny(scope, " \t\r\n") {
-				errs = append(errs, fmt.Errorf("cloudflare_oauth.scopes entries must be non-empty scope identifiers"))
-				break
-			}
+	for _, scope := range c.Scopes {
+		if scope == "" || strings.ContainsAny(scope, " \t\r\n") {
+			errs = append(errs, fmt.Errorf("cloudflare_oauth.scopes entries must be non-empty scope identifiers"))
+			break
 		}
 	}
 	redirect, err := url.Parse(c.RedirectURL)

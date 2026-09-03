@@ -12,17 +12,10 @@ import (
 	"net/http"
 	"net/url"
 	"sort"
-	"strconv"
 	"strings"
 )
 
 const maxCloudflareResponseBytes = 2 << 20
-
-type oauthTokenResponse struct {
-	AccessToken      string `json:"access_token"`
-	Error            string `json:"error"`
-	ErrorDescription string `json:"error_description"`
-}
 
 type apiError struct {
 	Code    int    `json:"code"`
@@ -62,78 +55,55 @@ type createdToken struct {
 	Value string `json:"value"`
 }
 
-func (s *Service) exchangeCode(ctx context.Context, client *http.Client, code, verifier string) (string, error) {
-	values := url.Values{
-		"grant_type":    {"authorization_code"},
-		"code":          {code},
-		"redirect_uri":  {s.cfg.RedirectURL},
-		"code_verifier": {verifier},
-	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, s.tokenURL, strings.NewReader(values.Encode()))
-	if err != nil {
-		return "", fmt.Errorf("create OAuth token request: %w", err)
-	}
-	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	request.Header.Set("Accept", "application/json")
-	if s.cfg.TokenEndpointAuthMethod == "client_secret_post" {
-		values.Set("client_id", s.cfg.ClientID)
-		values.Set("client_secret", s.cfg.ClientSecret)
-		request.Body = io.NopCloser(strings.NewReader(values.Encode()))
-		request.ContentLength = int64(len(values.Encode()))
-	} else {
-		request.SetBasicAuth(s.cfg.ClientID, s.cfg.ClientSecret)
-	}
-	response, err := client.Do(request)
-	if err != nil {
-		return "", fmt.Errorf("exchange Cloudflare OAuth code: %w", err)
-	}
-	defer response.Body.Close()
-	var result oauthTokenResponse
-	if err := decodeLimitedJSON(response.Body, &result); err != nil {
-		return "", fmt.Errorf("decode Cloudflare OAuth response: %w", err)
-	}
-	if response.StatusCode < 200 || response.StatusCode >= 300 || result.AccessToken == "" {
-		message := firstNonEmpty(result.ErrorDescription, result.Error)
-		if message == "" {
-			message = response.Status
-		}
-		return "", fmt.Errorf("cloudflare OAuth exchange failed: %s", message)
-	}
-	return result.AccessToken, nil
+type tokenVerification struct {
+	ID     string `json:"id"`
+	Status string `json:"status"`
 }
 
-func (s *Service) discoverAccounts(ctx context.Context, client *http.Client, token string) ([]Account, error) {
-	accounts, err := s.listAccounts(ctx, client, token)
-	if err != nil {
-		return nil, err
-	}
-	result := make([]Account, 0, len(accounts))
-	for _, account := range accounts {
-		buckets, bucketErr := s.listBuckets(ctx, client, token, account.ID)
-		view := Account{ID: strings.ToLower(account.ID), Name: account.Name, Buckets: buckets}
-		if bucketErr != nil {
-			view.Error = truncate(bucketErr.Error(), 240)
-		}
-		result = append(result, view)
-	}
-	sort.Slice(result, func(i, j int) bool { return result[i].Name < result[j].Name })
-	return result, nil
+type bootstrapIdentity struct {
+	ID        string
+	Owner     string
+	AccountID string
 }
 
-func (s *Service) listAccounts(ctx context.Context, client *http.Client, token string) ([]apiAccount, error) {
-	var all []apiAccount
-	for page := 1; page <= 20; page++ {
-		path := "/accounts?per_page=50&page=" + strconv.Itoa(page)
-		var envelope apiEnvelope[[]apiAccount]
-		if err := s.doAPI(ctx, client, http.MethodGet, path, token, nil, &envelope); err != nil {
-			return nil, err
-		}
-		all = append(all, envelope.Result...)
-		if envelope.ResultInfo.TotalPages <= page || len(envelope.Result) == 0 {
-			break
-		}
+func (s *Service) discoverBootstrapAccount(
+	ctx context.Context,
+	client *http.Client,
+	token, accountID string,
+) ([]Account, bootstrapIdentity, error) {
+	identity, err := s.verifyAccountToken(ctx, client, token, accountID)
+	if err != nil {
+		return nil, bootstrapIdentity{}, err
 	}
-	return all, nil
+	var accountEnvelope apiEnvelope[apiAccount]
+	accountPath := "/accounts/" + url.PathEscape(accountID)
+	if err := s.doAPI(ctx, client, http.MethodGet, accountPath, token, nil, &accountEnvelope); err != nil {
+		return nil, bootstrapIdentity{}, err
+	}
+	if !strings.EqualFold(accountEnvelope.Result.ID, accountID) || strings.TrimSpace(accountEnvelope.Result.Name) == "" {
+		return nil, bootstrapIdentity{}, errors.New("cloudflare returned invalid account details for the bootstrap token")
+	}
+	buckets, err := s.listBuckets(ctx, client, token, accountID)
+	if err != nil {
+		return nil, bootstrapIdentity{}, err
+	}
+	return []Account{{ID: accountID, Name: accountEnvelope.Result.Name, Buckets: buckets}}, identity, nil
+}
+
+func (s *Service) verifyAccountToken(
+	ctx context.Context,
+	client *http.Client,
+	token, accountID string,
+) (bootstrapIdentity, error) {
+	var envelope apiEnvelope[tokenVerification]
+	path := "/accounts/" + url.PathEscape(accountID) + "/tokens/verify"
+	if err := s.doAPI(ctx, client, http.MethodGet, path, token, nil, &envelope); err != nil {
+		return bootstrapIdentity{}, err
+	}
+	if envelope.Result.ID == "" || envelope.Result.Status != "active" {
+		return bootstrapIdentity{}, errors.New("cloudflare account bootstrap token is not active")
+	}
+	return bootstrapIdentity{ID: envelope.Result.ID, Owner: "account", AccountID: accountID}, nil
 }
 
 func (s *Service) listBuckets(ctx context.Context, client *http.Client, token, accountID string) ([]Bucket, error) {
@@ -171,11 +141,11 @@ func (s *Service) listBuckets(ctx context.Context, client *http.Client, token, a
 func (s *Service) createBucketToken(
 	ctx context.Context,
 	client *http.Client,
-	oauthToken string,
+	bootstrapToken string,
 	account Account,
 	bucket Bucket,
 ) (string, string, error) {
-	permissionID, err := s.bucketWritePermissionID(ctx, client, oauthToken, account.ID)
+	permissionID, err := s.bucketWritePermissionID(ctx, client, bootstrapToken, account.ID)
 	if err != nil {
 		return "", "", err
 	}
@@ -197,7 +167,7 @@ func (s *Service) createBucketToken(
 	}
 	var envelope apiEnvelope[createdToken]
 	path := "/accounts/" + url.PathEscape(account.ID) + "/tokens"
-	if err := s.doAPI(ctx, client, http.MethodPost, path, oauthToken, body, &envelope); err != nil {
+	if err := s.doAPI(ctx, client, http.MethodPost, path, bootstrapToken, body, &envelope); err != nil {
 		return "", "", err
 	}
 	if envelope.Result.ID == "" || envelope.Result.Value == "" {
@@ -221,15 +191,30 @@ func (s *Service) bucketWritePermissionID(ctx context.Context, client *http.Clie
 			return permission.ID, nil
 		}
 	}
-	return "", errors.New("cloudflare did not expose the bucket-scoped R2 write permission; verify the OAuth token-management scope")
+	return "", errors.New("cloudflare did not expose the bucket-scoped R2 write permission; verify the bootstrap token permissions")
 }
 
-func (s *Service) deleteAccountToken(ctx context.Context, client *http.Client, oauthToken, accountID, tokenID string) error {
+func (s *Service) deleteAccountToken(ctx context.Context, client *http.Client, bootstrapToken, accountID, tokenID string) error {
 	var envelope apiEnvelope[struct {
 		ID string `json:"id"`
 	}]
 	path := "/accounts/" + url.PathEscape(accountID) + "/tokens/" + url.PathEscape(tokenID)
-	return s.doAPI(ctx, client, http.MethodDelete, path, oauthToken, nil, &envelope)
+	return s.doAPI(ctx, client, http.MethodDelete, path, bootstrapToken, nil, &envelope)
+}
+
+func (s *Service) deleteBootstrapToken(
+	ctx context.Context,
+	client *http.Client,
+	bootstrapToken string,
+	identity bootstrapIdentity,
+) error {
+	if identity.ID == "" {
+		return errors.New("bootstrap token identifier is unavailable")
+	}
+	if identity.Owner != "account" || identity.AccountID == "" {
+		return errors.New("bootstrap token ownership is unavailable")
+	}
+	return s.deleteAccountToken(ctx, client, bootstrapToken, identity.AccountID, identity.ID)
 }
 
 func (s *Service) doAPI(

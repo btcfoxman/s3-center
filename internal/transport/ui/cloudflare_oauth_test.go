@@ -34,7 +34,7 @@ func TestCloudflareStartUsesTrustedOriginAndOneTimeSecretTicket(t *testing.T) {
 	service, err := cloudflareonboard.New(&cloudflareonboard.Options{
 		Config: config.CloudflareOAuthConfig{
 			Enabled: true, ClientID: "client", ClientSecret: "secret",
-			RedirectURL: "https://trusted.example/ui/oauth/cloudflare/callback",
+			RedirectURL: "https://trusted.example/ui/",
 			Scopes:      []string{"scope.read"}, SessionTTL: 20 * time.Minute,
 			ConnectorScheme: "s3center", TokenEndpointAuthMethod: "client_secret_basic",
 		},
