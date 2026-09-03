@@ -13,7 +13,7 @@
 3. 点击 **创建隔离登录**，再点击 **打开隔离 Cloudflare 登录**。
 4. Connector 在 `%LOCALAPPDATA%\S3Center\Profiles\<profile-id>\browser-chrome-v1` 启动真正的原生 Chrome 进程，不使用本机默认 Profile、Edge、Playwright、WebDriver 或远程调试。新 Profile 初始不绑定浏览器账号，并关闭同步、首次启动资料导入、扩展和密码保存。代理凭据由 Connector 内存中的随机本机转发端口承接，本机控制页经同一路由访问 Cloudflare trace 校验出口 IP；代理失败会终止，不会回退本机直连。
 5. 在本机控制页点击 **打开 Cloudflare 官方页面**，在新标签页登录对应 CF 身份。预填页面的权限和名称已填好；确认创建后，复制只显示一次的 **API Token**，并把 Token 与当前 Cloudflare Account 页面地址粘贴回本机控制页。Connector 会从地址中取得 Account ID，再经随机 `127.0.0.1` 桥接安全导入。
-6. 服务端通过同一代理验证这个临时引导 Token，并列出所选 Account 的 R2 Bucket。选择一个 Bucket 后，系统创建只允许该 Bucket 读写的 R2 S3 凭据、验证连接、加密落库，最后自动撤销引导 Token。
+6. 服务端通过同一代理验证这个临时引导 Token，并列出所选 Account 的 R2 Bucket。选择一个 Bucket 后，系统创建只允许该 Bucket 读写的 R2 S3 凭据，等待 Cloudflare IAM 全局生效后验证连接、加密落库，最后自动撤销引导 Token。
 
 每个登录身份拥有独立 Cookie、Profile ID 和代理绑定，不会与另一个 CF 身份共用浏览器状态。自定义 URI 里只有一次性票据，没有代理密码；票据兑换响应禁止缓存且只能读取一次。Profile 元数据只记录脱敏的代理 endpoint，不记录代理认证信息。
 
@@ -38,6 +38,10 @@ Cloudflare 的公共 OAuth scope 目录当前不暴露 `Account API Tokens Write
 ### 创建桶级凭据时报策略复用错误
 
 Cloudflare 创建 Token 时，`policies[].id` 是服务端生成的响应字段，不应在新建请求中自行提供；否则会返回 `Reusing existing policies is not supported by token creation`。当前实现只提交新的 `effect`、`permission_groups` 与 Bucket `resources`，由 Cloudflare 分配策略 ID。
+
+### 创建后首次验证返回 401
+
+Cloudflare R2 的 IAM 权限变更采用最终一致模型，新创建的 API Key 可能需要数秒、最长约 1 分钟才能在 S3 网关全球生效。当前实现会在同一次接入请求内保留刚生成的凭据，对 `HeadBucket` 的 `401 Unauthorized`/`403 AccessDenied` 自动重试最长 75 秒；期间管理端会保持“正在验证”。只有超时或出现非权限类错误时才判定失败并撤销刚创建的 Bucket Token，因此不要在第一次 401 时重复点击或另建 Token。
 
 ## 备选：手动凭据接入
 
@@ -67,7 +71,7 @@ Cloudflare 创建 Token 时，`policies[].id` 是服务端生成的响应字段�
 | 出口代理 | 可选，支持 HTTP、HTTPS、SOCKS5、SOCKS5H；不写协议时按 HTTP |
 | 预警线 | 当前存储达到免费存储额度的百分比时转为黄色预警 |
 
-提交后服务端会通过所填代理对目标 Bucket 执行一次 `HeadBucket`。只有 endpoint、代理、凭据和 Bucket 权限全部验证成功后，定义才会加密保存并立即加入读写调度。
+提交后服务端会通过所填代理对目标 Bucket 执行 `HeadBucket`。只有 endpoint、代理、凭据和 Bucket 权限全部验证成功后，定义才会加密保存并立即加入读写调度。手工填入的既有凭据不会套用“新 Token 等待传播”重试；若这里直接返回 401，应检查 Access Key、Secret 和 Account ID。
 
 可用代理示例：
 

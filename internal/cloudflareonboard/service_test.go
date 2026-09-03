@@ -28,18 +28,28 @@ const (
 )
 
 type fakeBackends struct {
-	mu         sync.Mutex
-	request    *backendmanage.CreateRequest
-	connection backendmanage.Connection
-	createErr  error
-	existing   backendmanage.AccountConnection
+	mu          sync.Mutex
+	request     *backendmanage.CreateRequest
+	connection  backendmanage.Connection
+	createErr   error
+	createErrs  []error
+	createCalls int
+	existing    backendmanage.AccountConnection
 }
 
 func (f *fakeBackends) CreateProvisioned(_ context.Context, request *backendmanage.CreateRequest, connection backendmanage.Connection) (backendmanage.View, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.createCalls++
 	copyOfRequest := *request
 	f.request, f.connection = &copyOfRequest, connection
+	if len(f.createErrs) > 0 {
+		err := f.createErrs[0]
+		f.createErrs = f.createErrs[1:]
+		if err != nil {
+			return backendmanage.View{}, err
+		}
+	}
 	if f.createErr != nil {
 		return backendmanage.View{}, f.createErr
 	}
@@ -54,6 +64,11 @@ func (f *fakeBackends) ConnectionForAccount(accountID string) (backendmanage.Acc
 }
 
 func (f *fakeBackends) HasBackend(string) bool { return false }
+
+type fakeHTTPStatusError struct{ status int }
+
+func (e fakeHTTPStatusError) Error() string       { return http.StatusText(e.status) }
+func (e fakeHTTPStatusError) HTTPStatusCode() int { return e.status }
 
 type cloudflareFixture struct {
 	server     *httptest.Server
@@ -200,6 +215,64 @@ func TestBrowserOnboardingEndToEndAndSecretBoundaries(t *testing.T) {
 	}
 }
 
+func TestProvisionRetriesWhileNewR2CredentialPropagates(t *testing.T) {
+	t.Parallel()
+	fixture := newCloudflareFixture(t)
+	unauthorized := errors.Join(
+		errors.New("check bucket access failed"),
+		fakeHTTPStatusError{status: http.StatusUnauthorized},
+	)
+	backends := &fakeBackends{createErrs: []error{unauthorized, unauthorized}}
+	service := newTestService(t, fixture, backends, func(string) *http.Client { return fixture.server.Client() })
+	service.activationTimeout = 100 * time.Millisecond
+	service.activationDelay = time.Millisecond
+	started, _ := startAndAuthorizeConnector(t, service)
+
+	created, err := service.Complete(context.Background(), CompleteRequest{
+		SessionID: started.Session.ID, AccountID: testAccountID, Bucket: "media-assets", BackendName: "r2-eventual-iam",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	backends.mu.Lock()
+	createCalls := backends.createCalls
+	backends.mu.Unlock()
+	if created.Name != "r2-eventual-iam" || createCalls != 3 {
+		t.Fatalf("created backend/calls = %q/%d, want r2-eventual-iam/3", created.Name, createCalls)
+	}
+	fixture.mu.Lock()
+	generatedRevoked := fixture.deletedIDs[testTokenID]
+	bootstrapRevoked := fixture.deletedIDs[testBootstrapID]
+	fixture.mu.Unlock()
+	if generatedRevoked || !bootstrapRevoked {
+		t.Fatalf("generated token revoked=%v bootstrap revoked=%v", generatedRevoked, bootstrapRevoked)
+	}
+}
+
+func TestProvisionRevokesGeneratedTokenWhenCredentialNeverActivates(t *testing.T) {
+	t.Parallel()
+	fixture := newCloudflareFixture(t)
+	backends := &fakeBackends{createErr: fakeHTTPStatusError{status: http.StatusUnauthorized}}
+	service := newTestService(t, fixture, backends, func(string) *http.Client { return fixture.server.Client() })
+	service.activationTimeout = 20 * time.Millisecond
+	service.activationDelay = time.Millisecond
+	started, _ := startAndAuthorizeConnector(t, service)
+
+	_, err := service.Complete(context.Background(), CompleteRequest{
+		SessionID: started.Session.ID, AccountID: testAccountID, Bucket: "media-assets",
+	})
+	if err == nil || !strings.Contains(err.Error(), "IAM propagation") {
+		t.Fatalf("activation timeout error = %v", err)
+	}
+	fixture.mu.Lock()
+	generatedRevoked := fixture.deletedIDs[testTokenID]
+	bootstrapRevoked := fixture.deletedIDs[testBootstrapID]
+	fixture.mu.Unlock()
+	if !generatedRevoked || bootstrapRevoked {
+		t.Fatalf("generated token revoked=%v bootstrap revoked=%v", generatedRevoked, bootstrapRevoked)
+	}
+}
+
 func TestProvisionFailureRevokesGeneratedTokenButKeepsBootstrapForRetry(t *testing.T) {
 	t.Parallel()
 	fixture := newCloudflareFixture(t)
@@ -209,6 +282,9 @@ func TestProvisionFailureRevokesGeneratedTokenButKeepsBootstrapForRetry(t *testi
 	_, err := service.Complete(context.Background(), CompleteRequest{SessionID: started.Session.ID, AccountID: testAccountID, Bucket: "media-assets"})
 	if err == nil || !strings.Contains(err.Error(), "probe failed") {
 		t.Fatalf("expected backend failure, got %v", err)
+	}
+	if backends.createCalls != 1 {
+		t.Fatalf("non-authentication failure retried %d times", backends.createCalls)
 	}
 	fixture.mu.Lock()
 	defer fixture.mu.Unlock()

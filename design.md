@@ -282,6 +282,7 @@ Connector 为每个 Cloudflare 身份固定绑定全新的 S3 Center 专用 Chro
 验证引导 Token
 → 发现 Account / R2 Bucket
 → 创建仅限所选 Bucket 的 Account-owned R2 Token
+→ 等待 R2 IAM 传播（401/403 最长重试 75 秒）
 → HeadBucket 验证并加密落库
 → 撤销引导 Token
 ```
@@ -289,6 +290,8 @@ Connector 为每个 Cloudflare 身份固定绑定全新的 S3 Center 专用 Chro
 引导 Token 只驻留短期内存，不进入数据库和日志；登录 Cookie 只在本机 Profile。若创建后端失败，刚生成的 Bucket Token 会被撤销，引导 Token 在会话内保留以便重试。
 
 创建 Bucket Token 的请求不得携带 `policies[].id`；该 ID 由 Cloudflare 在创建成功后生成。请求只发送 `effect`、权限组 ID 和目标 Bucket resource，避免被 API 判定为复用已有策略。
+
+R2 的 IAM 权限变更是最终一致的。创建 Token 成功不代表 S3 网关已经立即接受新 Access Key；只在浏览器接入刚生成凭据的阶段，对 `HeadBucket` 返回的 401/403 做最长 75 秒的有界重试。普通手工凭据和非鉴权错误不重试，最终失败时仍撤销未接入的 Bucket Token。
 
 ## 方案三：单独接入 R2 Bucket Token
 

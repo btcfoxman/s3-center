@@ -24,10 +24,12 @@ import (
 )
 
 const (
-	defaultAuthorizationURL = "https://dash.cloudflare.com/"
-	defaultAPIBaseURL       = "https://api.cloudflare.com/client/v4"
-	bootstrapCredentialName = "S3 Center temporary onboarding" //nolint:gosec // Public display label, not a credential.
-	bootstrapPermissions    = `[{"key":"account_api_tokens","type":"edit"},{"key":"account_settings","type":"read"},{"key":"workers_r2","type":"edit"}]`
+	defaultAuthorizationURL        = "https://dash.cloudflare.com/"
+	defaultAPIBaseURL              = "https://api.cloudflare.com/client/v4"
+	bootstrapCredentialName        = "S3 Center temporary onboarding" //nolint:gosec // Public display label, not a credential.
+	bootstrapPermissions           = `[{"key":"account_api_tokens","type":"edit"},{"key":"account_settings","type":"read"},{"key":"workers_r2","type":"edit"}]`
+	credentialActivationTimeout    = 75 * time.Second
+	credentialActivationRetryDelay = 2 * time.Second
 	// ConnectorProtocolVersion rejects launchers that use automation or let Edge
 	// implicit sign-in attach local browser identity to an isolated CF profile.
 	ConnectorProtocolVersion = "native-browser-v2"
@@ -60,12 +62,14 @@ type Options struct {
 // are never persisted: after provisioning, only the generated bucket R2
 // credential is retained by backendmanage in its encrypted definition.
 type Service struct {
-	cfg              config.CloudflareOAuthConfig
-	backends         BackendManager
-	authorizationURL string
-	apiBaseURL       string
-	now              func() time.Time
-	httpClient       func(string) *http.Client
+	cfg               config.CloudflareOAuthConfig
+	backends          BackendManager
+	authorizationURL  string
+	apiBaseURL        string
+	now               func() time.Time
+	httpClient        func(string) *http.Client
+	activationTimeout time.Duration
+	activationDelay   time.Duration
 
 	mu           sync.Mutex
 	sessions     map[string]*session
@@ -200,8 +204,10 @@ func New(options *Options) (*Service, error) {
 		authorizationURL: firstNonEmpty(options.AuthorizationURL, defaultAuthorizationURL),
 		apiBaseURL:       strings.TrimRight(firstNonEmpty(options.APIBaseURL, defaultAPIBaseURL), "/"),
 		now:              now, httpClient: httpClient,
-		sessions: make(map[string]*session),
-		tickets:  make(map[string]string), reportTokens: make(map[string]string),
+		activationTimeout: credentialActivationTimeout,
+		activationDelay:   credentialActivationRetryDelay,
+		sessions:          make(map[string]*session),
+		tickets:           make(map[string]string), reportTokens: make(map[string]string),
 	}, nil
 }
 
@@ -516,7 +522,7 @@ func (s *Service) Complete(ctx context.Context, request CompleteRequest) (backen
 	client := s.httpClient(proxyURL)
 	accessKeyID, secretAccessKey, err := s.createBucketToken(ctx, client, accessToken, account, bucket)
 	if err == nil {
-		view, createErr := s.backends.CreateProvisioned(ctx, &backendmanage.CreateRequest{
+		view, createErr := s.createProvisionedAfterActivation(ctx, &backendmanage.CreateRequest{
 			Name: backendName, AccountLabel: account.Name, AccountID: account.ID,
 			Jurisdiction: bucket.Jurisdiction, Bucket: bucket.Name,
 			AccessKeyID: accessKeyID, SecretAccessKey: secretAccessKey,
@@ -559,6 +565,77 @@ func (s *Service) Complete(ctx context.Context, request CompleteRequest) (backen
 	}
 	s.mu.Unlock()
 	return backendmanage.View{}, err
+}
+
+// createProvisionedAfterActivation waits only for newly minted Cloudflare R2
+// credentials. R2 IAM changes are eventually consistent and can briefly return
+// 401/403 even though the Create Token API has already succeeded.
+func (s *Service) createProvisionedAfterActivation(
+	ctx context.Context,
+	request *backendmanage.CreateRequest,
+	connection backendmanage.Connection,
+) (backendmanage.View, error) {
+	activationCtx, cancel := context.WithTimeout(ctx, s.activationTimeout)
+	defer cancel()
+	var lastErr error
+	for {
+		view, err := s.backends.CreateProvisioned(activationCtx, request, connection)
+		if err == nil {
+			return view, nil
+		}
+		lastErr = err
+		if activationCtx.Err() != nil {
+			break
+		}
+		if !isCredentialActivationPending(err) {
+			return backendmanage.View{}, err
+		}
+		timer := time.NewTimer(s.activationDelay)
+		select {
+		case <-timer.C:
+		case <-activationCtx.Done():
+			timer.Stop()
+		}
+		if activationCtx.Err() != nil {
+			break
+		}
+	}
+	if ctx.Err() != nil {
+		return backendmanage.View{}, fmt.Errorf("cloudflare R2 credential activation interrupted: %w", ctx.Err())
+	}
+	return backendmanage.View{}, fmt.Errorf(
+		"cloudflare R2 credential remained unauthorized after waiting %s for IAM propagation: %w",
+		s.activationTimeout,
+		lastErr,
+	)
+}
+
+type httpStatusError interface {
+	HTTPStatusCode() int
+}
+
+type apiCodeError interface {
+	ErrorCode() string
+}
+
+func isCredentialActivationPending(err error) bool {
+	var statusErr httpStatusError
+	if errors.As(err, &statusErr) {
+		status := statusErr.HTTPStatusCode()
+		if status == http.StatusUnauthorized || status == http.StatusForbidden {
+			return true
+		}
+	}
+	var codeErr apiCodeError
+	if !errors.As(err, &codeErr) {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(codeErr.ErrorCode())) {
+	case "unauthorized", "accessdenied", "invalidaccesskeyid":
+		return true
+	default:
+		return false
+	}
 }
 
 func selectedBucket(accounts []Account, accountID, bucketName string) (Account, Bucket, bool) {

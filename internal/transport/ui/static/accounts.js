@@ -153,7 +153,7 @@
     oauthCompleteForm.addEventListener('submit', function (event) {
       event.preventDefault();
       oauthCompleteButton.disabled = true;
-      setStatus(oauthStatus, 'checking', '正在创建 Bucket 级 R2 Token 并验证连接…');
+      setStatus(oauthStatus, 'checking', '正在创建 Bucket 级 R2 Token，并等待 Cloudflare IAM 生效后验证连接（通常数秒，最长约 1 分钟）…');
       postJSON('api/cloudflare-onboarding/complete', {
         session_id: oauthSessionID, account_id: oauthAccount.value, bucket: oauthBucket.value,
         backend_name: document.getElementById('oauth-backend-name').value,
