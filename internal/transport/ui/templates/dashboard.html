@@ -515,7 +515,7 @@
     <div class="dialog-heading">
       <span class="section-index">IDENTITY PASSPORT / SECURE ONBOARDING</span>
       <h2>接入 Cloudflare R2</h2>
-      <p>一个 CF 登录身份对应一个隔离浏览器 Profile 与固定代理出口；登录后由官方预填页面创建一次性引导 Token，自动发现账号与 Bucket。</p>
+      <p>一个 CF 登录身份对应一个原生浏览器隔离 Profile 与固定代理出口；登录后由官方预填页面创建一次性引导 Token，自动发现账号与 Bucket。</p>
     </div>
     <div class="onboarding-tabs" role="tablist" aria-label="Cloudflare 接入方式">
       {{if .CloudflareOAuthEnabled}}<button id="oauth-tab" type="button" class="onboarding-tab active" role="tab" aria-selected="true" data-panel="oauth-panel">快速隔离登录 <span>推荐</span></button>{{end}}
@@ -526,8 +526,8 @@
     <section id="oauth-panel" class="onboarding-panel active" role="tabpanel">
       <div class="oauth-identity-band">
         <div class="oauth-identity-mark">CF</div>
-        <div><b>隔离身份通道</b><span>登录 Cookie 只保存在本机独立 Profile；代理认证不会写入浏览器目录。</span></div>
-        <a class="connector-download" href="connector/download">下载 Connector</a>
+        <div><b>原生浏览器身份通道</b><span>不使用 Playwright/WebDriver；登录 Cookie 只保存在本机独立 Profile，代理认证仅驻留会话内存。</span></div>
+        <a class="connector-download" href="connector/download">下载 Connector 2.0</a>
       </div>
       <form id="oauth-start-form" autocomplete="off">
         <input id="oauth-existing-account" name="account_id" type="hidden">
@@ -537,7 +537,7 @@
         </div>
         <div class="oauth-flow-actions">
           <button id="oauth-start" type="submit" class="btn-primary">创建隔离登录</button>
-          <span>首次使用请先下载并安装 Connector（当前 Windows 用户，无需管理员权限）。</span>
+          <span>首次使用或曾安装 1.x 时，请下载并安装 Connector 2.0（保留既有 Profile，无需管理员权限）。</span>
         </div>
       </form>
 
@@ -548,7 +548,7 @@
         </div>
         <div class="oauth-route-line"><i></i><span id="oauth-route-label">正在准备安全通道…</span><i></i></div>
         <button id="oauth-launch" type="button" class="oauth-launch">打开隔离 Cloudflare 登录 <b>↗</b></button>
-        <p class="oauth-launch-help">浏览器询问是否打开 S3 Center Connector 时请选择允许；在 Cloudflare 官方预填页面确认创建临时 Token，再用页面右下角面板安全导入。</p>
+        <p class="oauth-launch-help">浏览器询问是否打开 S3 Center Connector 时请选择允许；Connector 会启动未受自动化控制的原生 Edge/Chrome。正常登录后，在官方预填页面创建临时 Token，再用右下角面板安全导入。</p>
       </div>
 
       <form id="oauth-complete-form" class="oauth-complete" autocomplete="off" hidden>

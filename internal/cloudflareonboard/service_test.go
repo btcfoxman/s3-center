@@ -146,10 +146,10 @@ func TestBrowserOnboardingEndToEndAndSecretBoundaries(t *testing.T) {
 	if _, err := service.ConsumeConnectorTicket(started.ConnectorTicket); err == nil {
 		t.Fatal("connector ticket was reusable")
 	}
-	if err := service.ReportConnector(context.Background(), &ConnectorReport{Token: payload.ReportToken, Status: "proxy_verified", ExitIP: "203.0.113.9"}); err != nil {
+	if err := service.ReportConnector(context.Background(), &ConnectorReport{Token: payload.ReportToken, ConnectorVersion: ConnectorProtocolVersion, Status: "proxy_verified", ExitIP: "203.0.113.9"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := service.ReportConnector(context.Background(), &ConnectorReport{Token: payload.ReportToken, Status: "bootstrap_token", AccountID: testAccountID, BootstrapToken: testBootstrapToken}); err != nil {
+	if err := service.ReportConnector(context.Background(), &ConnectorReport{Token: payload.ReportToken, ConnectorVersion: ConnectorProtocolVersion, Status: "bootstrap_token", AccountID: testAccountID, BootstrapToken: testBootstrapToken}); err != nil {
 		t.Fatal(err)
 	}
 	view, err := service.Status(started.Session.ID)
@@ -210,9 +210,36 @@ func TestConnectorRejectsOAuthAccessToken(t *testing.T) {
 	service := newTestService(t, fixture, &fakeBackends{}, func(string) *http.Client { return fixture.server.Client() })
 	started, _ := service.Start(context.Background(), StartRequest{IdentityLabel: "invalid token"})
 	payload, _ := service.ConsumeConnectorTicket(started.ConnectorTicket)
-	err := service.ReportConnector(context.Background(), &ConnectorReport{Token: payload.ReportToken, Status: "bootstrap_token", AccountID: testAccountID, BootstrapToken: testOAuthToken})
+	err := service.ReportConnector(context.Background(), &ConnectorReport{Token: payload.ReportToken, ConnectorVersion: ConnectorProtocolVersion, Status: "bootstrap_token", AccountID: testAccountID, BootstrapToken: testOAuthToken})
 	if err == nil || !strings.Contains(err.Error(), "cannot mint") {
 		t.Fatalf("OAuth token error = %v", err)
+	}
+}
+
+func TestConnectorRejectsLegacyAutomatedBrowserVersion(t *testing.T) {
+	t.Parallel()
+	fixture := newCloudflareFixture(t)
+	service := newTestService(t, fixture, &fakeBackends{}, func(string) *http.Client { return fixture.server.Client() })
+	started, err := service.Start(context.Background(), StartRequest{IdentityLabel: "legacy connector"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload, err := service.ConsumeConnectorTicket(started.ConnectorTicket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = service.ReportConnector(context.Background(), &ConnectorReport{
+		Token: payload.ReportToken, Status: "proxy_verified", ExitIP: "203.0.113.9",
+	})
+	if err == nil || !strings.Contains(err.Error(), "Connector 2.0") {
+		t.Fatalf("legacy connector error = %v", err)
+	}
+	view, statusErr := service.Status(started.Session.ID)
+	if statusErr != nil {
+		t.Fatal(statusErr)
+	}
+	if view.Status != "error" || !strings.Contains(view.Error, "Connector 2.0") {
+		t.Fatalf("legacy connector session = %+v", view)
 	}
 }
 
@@ -250,10 +277,10 @@ func startAndAuthorizeConnector(t *testing.T, service *Service) (StartResult, Co
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := service.ReportConnector(context.Background(), &ConnectorReport{Token: payload.ReportToken, Status: "proxy_verified", ExitIP: "203.0.113.9"}); err != nil {
+	if err := service.ReportConnector(context.Background(), &ConnectorReport{Token: payload.ReportToken, ConnectorVersion: ConnectorProtocolVersion, Status: "proxy_verified", ExitIP: "203.0.113.9"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := service.ReportConnector(context.Background(), &ConnectorReport{Token: payload.ReportToken, Status: "bootstrap_token", AccountID: testAccountID, BootstrapToken: testBootstrapToken}); err != nil {
+	if err := service.ReportConnector(context.Background(), &ConnectorReport{Token: payload.ReportToken, ConnectorVersion: ConnectorProtocolVersion, Status: "bootstrap_token", AccountID: testAccountID, BootstrapToken: testBootstrapToken}); err != nil {
 		t.Fatal(err)
 	}
 	return started, payload

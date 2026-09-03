@@ -19,7 +19,10 @@ import (
 	"github.com/afreidah/s3-orchestrator/internal/util/humanize"
 )
 
-//go:embed templates/*.html static/* connector/*
+// Keep runtime dependencies out of the binary: only the redistributable
+// connector sources and its bundled helper extension belong in the ZIP.
+//
+//go:embed templates/*.html static/* connector/*.mjs connector/*.cmd connector/*.ps1 connector/*.json connector/*.md connector/extension/*
 var embeddedFS embed.FS
 
 // staticFS is the rooted view of the embedded static/ directory used

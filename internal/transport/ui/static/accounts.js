@@ -117,7 +117,7 @@
     oauthLaunchButton.addEventListener('click', function () {
       if (!connectorURL) return;
       window.location.href = connectorURL;
-      setStatus(oauthStatus, 'checking', '已请求启动 Connector，等待浏览器出口验证…');
+      setStatus(oauthStatus, 'checking', '已请求启动 Connector 2.0，等待原生浏览器出口验证…');
       schedulePoll(700);
     });
   }
@@ -140,7 +140,7 @@
         oauthLaunchButton.disabled = false;
         oauthSessionState.textContent = '通道已创建';
         oauthRouteLabel.textContent = body.session.proxy + ' → Cloudflare Token Wizard';
-        setStatus(oauthStatus, 'success', '通道有效期至 ' + new Date(body.session.expires_at).toLocaleTimeString() + '。点击上方按钮打开隔离登录与官方预填 Token 页面。');
+        setStatus(oauthStatus, 'success', '通道有效期至 ' + new Date(body.session.expires_at).toLocaleTimeString() + '。点击上方按钮启动原生隔离浏览器与官方预填 Token 页面。');
         oauthSessionBox.scrollIntoView({behavior: 'smooth', block: 'nearest'});
         schedulePoll(1200);
       }).catch(function (error) {
@@ -231,7 +231,7 @@
       setStatus(oauthStatus, 'error', session.error || '授权失败，请重试。');
       return;
     }
-    if (session.status === 'waiting_authorization') setStatus(oauthStatus, 'checking', session.error || '隔离浏览器出口验证成功，请在 Cloudflare 官方页面创建临时引导 Token，并用右下角面板安全导入。');
+    if (session.status === 'waiting_authorization') setStatus(oauthStatus, 'checking', session.error || '原生隔离浏览器出口验证成功，请正常完成 Cloudflare 登录，在官方页面创建临时引导 Token，并用右下角面板安全导入。');
     if (session.status === 'discovering') setStatus(oauthStatus, 'checking', '正在经同一代理验证引导 Token，并读取账号与 R2 Bucket…');
     if (session.status === 'authorized') {
       discoveredAccounts = session.accounts || [];

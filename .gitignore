@@ -23,6 +23,7 @@ deploy/production/.env
 deploy/production/cloudflared/
 output/playwright/
 .playwright-cli/
+internal/transport/ui/connector/node_modules/
 
 # Editor swap and backup files
 *.swp

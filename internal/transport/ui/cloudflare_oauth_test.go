@@ -104,10 +104,47 @@ func TestCloudflareConnectorArchiveIsComplete(t *testing.T) {
 			t.Fatalf("archive contains installed dependencies: %s", file.Name)
 		}
 	}
-	for _, name := range []string{"connector.mjs", "launcher.cmd", "install.ps1", "uninstall.ps1", "package.json", "package-lock.json", "README.md"} {
+	for _, name := range []string{
+		"connector.mjs", "launcher.cmd", "install.ps1", "uninstall.ps1", "package.json", "package-lock.json", "README.md",
+		"extension/manifest.json", "extension/background.js", "extension/bootstrap.js", "extension/panel.js",
+	} {
 		fullName := "s3-center-cloudflare-connector/" + name
 		if !files[fullName] {
 			t.Errorf("archive missing %s", fullName)
 		}
+	}
+	connectorSource, err := embeddedFS.ReadFile("connector/connector.mjs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(connectorSource, []byte("playwright")) || bytes.Contains(connectorSource, []byte("remote-debugging")) {
+		t.Fatal("connector launcher must not automate or remotely debug the Cloudflare login browser")
+	}
+}
+
+func TestCloudflareConnectorDownloadIsVersionedAndNeverCached(t *testing.T) {
+	t.Parallel()
+	service, err := cloudflareonboard.New(&cloudflareonboard.Options{
+		Config: config.CloudflareOAuthConfig{
+			Enabled: true, RedirectURL: "https://trusted.example/ui/", SessionTTL: 20 * time.Minute, ConnectorScheme: "s3center",
+		},
+		Backends: onboardingBackendStub{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := &Handler{log: slog.Default(), cloudflareOnboarding: service, prefix: "/ui"}
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "https://trusted.example/ui/connector/download", nil)
+	recorder := httptest.NewRecorder()
+	handler.handleCloudflareConnectorDownload(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("download status = %d", recorder.Code)
+	}
+	if got := recorder.Header().Get("Cache-Control"); got != "no-store" {
+		t.Fatalf("Cache-Control = %q", got)
+	}
+	wantDisposition := `attachment; filename="s3-center-cloudflare-connector-` + cloudflareConnectorPackageVersion + `.zip"`
+	if got := recorder.Header().Get("Content-Disposition"); got != wantDisposition {
+		t.Fatalf("Content-Disposition = %q, want %q", got, wantDisposition)
 	}
 }

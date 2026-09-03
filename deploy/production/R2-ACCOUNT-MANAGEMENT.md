@@ -8,14 +8,16 @@
 
 管理员不再需要手工寻找 Account ID、R2 Access Key 和 Secret。登录管理端，在 **Cloudflare 账号额度** 区域点击 **新增 CF 身份**：
 
-1. 首次使用先下载 Connector ZIP，解压后运行 `powershell -ExecutionPolicy Bypass -File .\install.ps1`。它只为当前 Windows 用户注册 `s3center://`，不需要管理员权限。
+1. 首次使用先下载 Connector 2.0 ZIP，解压后运行 `powershell -ExecutionPolicy Bypass -File .\install.ps1`。它只为当前 Windows 用户注册 `s3center://`，不需要管理员权限。若曾安装 1.x，也必须运行一次新版安装脚本；既有 Profile 与 Cookie 会保留。
 2. 填写身份备注，以及该 CF 身份固定使用的代理（HTTP、HTTPS、SOCKS5/SOCKS5H，均可含用户名密码）。
 3. 点击 **创建隔离登录**，再点击 **打开隔离 Cloudflare 登录**。
-4. Connector 在 `%LOCALAPPDATA%\S3Center\Profiles\<profile-id>` 打开独立 Edge/Chrome Profile，先访问 Cloudflare trace 校验出口 IP；代理失败会终止，不会回退本机直连。
+4. Connector 在 `%LOCALAPPDATA%\S3Center\Profiles\<profile-id>` 启动真正的原生 Edge/Chrome 进程，不附加 Playwright、WebDriver 或远程调试。代理凭据由 Connector 内存中的随机本机转发端口承接，随包的最小 Manifest V3 辅助扩展访问 Cloudflare trace 校验出口 IP；代理失败会终止，不会回退本机直连。
 5. 在新窗口登录对应 CF 身份。Connector 会打开 Cloudflare 官方的 Account API Token 预填页面，权限和名称均已填好；确认创建后，复制页面只显示一次的 **API Token**，粘贴到页面右下角的 S3 Center 面板并点击 **安全导入**。Connector 会从当前 Cloudflare 官方页面自动取得 Account ID，无需手工寻找或填写。
 6. 服务端通过同一代理验证这个临时引导 Token，并列出所选 Account 的 R2 Bucket。选择一个 Bucket 后，系统创建只允许该 Bucket 读写的 R2 S3 凭据、验证连接、加密落库，最后自动撤销引导 Token。
 
 每个登录身份拥有独立 Cookie、Profile ID 和代理绑定，不会与另一个 CF 身份共用浏览器状态。自定义 URI 里只有一次性票据，没有代理密码；票据兑换响应禁止缓存且只能读取一次。Profile 元数据只记录脱敏的代理 endpoint，不记录代理认证信息。
+
+> Connector 1.x 曾通过 Playwright 启动浏览器。Cloudflare 的生产验证明确不支持自动化浏览器，可能在登录时显示 `There was a problem with verification`。Connector 2.0 已完全移除 Playwright 运行时；辅助扩展在登录页不注入界面，只有 URL 进入具体 Account 后才显示 Token 导入面板。
 
 临时引导 Token 只存在于服务端内存中的短期会话（生产默认 20 分钟），不写数据库或日志。完成选择后，系统使用它创建一个仅限目标 Bucket 的 Account-owned R2 Token，将 R2 Access Key / Secret 和代理整体加密保存，然后通过 Cloudflare API 撤销引导 Token 并从内存清除。创建后端失败时，刚创建的 Bucket Token 会自动撤销，引导 Token 保留到当前会话结束以便重试；若放弃流程，应在 Cloudflare Account API Tokens 页面手动撤销 `S3 Center temporary onboarding`。
 
@@ -28,6 +30,10 @@
 - `Account API Tokens Write`：创建和撤销 Bucket 级 R2 Token，以及撤销引导 Token 自身。
 
 Cloudflare 的公共 OAuth scope 目录当前不暴露 `Account API Tokens Write`，所以单纯 OAuth 登录无法自动生成长期 R2 S3 凭据；这也是采用“官方预填页面 + 一次性引导 Token”的原因。Cloudflare Access 不是本流程依赖，管理端仍使用自身登录会话与 CSRF 防护；如需企业身份门禁，可在管理域名前额外叠加 Access。
+
+### 登录验证仍失败时
+
+先确认安装输出明确显示 `Connector 2.0`，关闭旧版打开的失败窗口，并从管理端创建一条全新的接入会话（旧 ticket 不能重复使用）。仍失败时先用直连测试；若直连正常而某个代理失败，说明该代理可能在登录过程中轮换 IP、拦截 TLS/挑战脚本，或出口信誉不足，应更换稳定代理。隔离 Profile 不应安装广告拦截、脚本拦截、指纹防护或自动切换代理的扩展。
 
 ## 备选：手动凭据接入
 
@@ -146,4 +152,4 @@ cloudflare_oauth:
 - 页面不调用 Cloudflare Billing API，因此不会显示 Cloudflare 全账号的权威 Class A/Class B 或来自其他工具的用量。
 - 一个 Cloudflare Account 的免费额度由 Account 下的所有 R2 Bucket 共享。为同一个 Account 新增 Bucket 不会新增 10 GB；只有接入另一个独立且合规授权的 Account 才会形成另一张免费额度卡。
 
-Cloudflare 官方参考：[API Token 预填模板 URL](https://developers.cloudflare.com/fundamentals/api/how-to/account-owned-token-template/)、[通过 API 创建 Token](https://developers.cloudflare.com/fundamentals/api/how-to/create-via-api/)、[S3 API 凭据与 endpoint](https://developers.cloudflare.com/r2/api/tokens/)、[R2 定价与免费额度](https://developers.cloudflare.com/r2/pricing/)。
+Cloudflare 官方参考：[受支持的 Challenge 浏览器](https://developers.cloudflare.com/cloudflare-challenges/reference/supported-browsers/)、[API Token 预填模板 URL](https://developers.cloudflare.com/fundamentals/api/how-to/account-owned-token-template/)、[通过 API 创建 Token](https://developers.cloudflare.com/fundamentals/api/how-to/create-via-api/)、[S3 API 凭据与 endpoint](https://developers.cloudflare.com/r2/api/tokens/)、[R2 定价与免费额度](https://developers.cloudflare.com/r2/pricing/)。

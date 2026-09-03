@@ -276,7 +276,7 @@ OAuth 是控制面凭证，不一定直接适合作为 S3 数据面凭证。
 
 ## 方案二：隔离浏览器 + 一次性引导 Token（当前实现）
 
-Connector 为每个 Cloudflare 身份固定绑定本机独立 Profile 和可选代理，打开 Cloudflare 官方预填的 Account API Token 页面。管理员只需登录、确认并把一次性 Token 粘贴到页面内嵌的安全导入面板。服务端随后经同一代理完成：
+Connector 为每个 Cloudflare 身份固定绑定本机独立 Profile 和可选代理，并使用不带 Playwright/WebDriver/远程调试的原生 Edge/Chrome 打开 Cloudflare 官方预填 Account API Token 页面。随包的本机扩展负责代理认证与 Token 导入，但在登录验证阶段不修改 Cloudflare 页面。管理员只需登录、确认并把一次性 Token 粘贴到选定 Account 后出现的安全导入面板。服务端随后经同一代理完成：
 
 ```text
 验证引导 Token

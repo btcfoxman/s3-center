@@ -1,16 +1,28 @@
+import crypto from 'node:crypto';
 import fs from 'node:fs';
+import http from 'node:http';
+import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
-import { chromium } from 'playwright-core';
+import {spawn} from 'node:child_process';
+import {fileURLToPath} from 'node:url';
+import {Server as ProxyChainServer} from 'proxy-chain';
 
+const CONNECTOR_PROTOCOL_VERSION = 'native-browser-v1';
 const PROFILE_PATTERN = /^cf-[a-f0-9]{16}$/;
 const IDENTITY_PATTERN = /^cfi-[a-f0-9]{24}$/;
 const REQUEST_TIMEOUT_MS = 30_000;
+const EXTENSION_READY_TIMEOUT_MS = 45_000;
+const MAX_BRIDGE_BODY_BYTES = 16 << 10;
 
 let payload;
 let lockPath;
 let lockHandle;
+let browserProcess;
+let bridge;
+let localProxyServer;
+let stopping = false;
 
 try {
   const ticketURL = parseLaunchArgument(process.argv[2]);
@@ -24,44 +36,26 @@ try {
   ({lockPath, lockHandle} = acquireProfileLock(profileRoot));
 
   const executablePath = locateBrowser();
-  const proxy = playwrightProxy(payload.proxy_url);
-  const context = await chromium.launchPersistentContext(profileRoot, {
-    executablePath,
-    headless: false,
-    proxy,
-    viewport: null,
-    locale: 'zh-CN',
-    args: ['--start-maximized'],
-  });
+  const connectorRoot = path.dirname(fileURLToPath(import.meta.url));
+  const extensionRoot = path.join(connectorRoot, 'extension');
+  assertExtension(extensionRoot);
 
-  context.on('close', releaseProfileLock);
-  const page = context.pages()[0] || await context.newPage();
-  const exitIP = await verifyBrowserEgress(page);
-  await report('proxy_verified', exitIP);
-
-  let bootstrapSubmitted = false;
-  await page.exposeBinding('__s3CenterImportBootstrap', async (source, rawToken) => {
-    if (bootstrapSubmitted) throw new Error('This bootstrap token has already been submitted.');
-    const token = validateBootstrapToken(rawToken);
-    const accountID = accountIDFromDashboard(source.page.url());
-    await report('bootstrap_token', exitIP, '', token, accountID);
-    bootstrapSubmitted = true;
-    return {ok: true};
-  });
-  page.on('domcontentloaded', () => { void installImportPanel(page); });
-  await page.goto(payload.authorization_url, {waitUntil: 'domcontentloaded', timeout: REQUEST_TIMEOUT_MS});
-  await installImportPanel(page);
-  await report('browser_open', exitIP);
-  const panelTimer = setInterval(() => { void installImportPanel(page); }, 2_000);
-  context.on('close', () => clearInterval(panelTimer));
-  await context.waitForEvent('close');
+  bridge = await createBridge();
+  const browserProxyURL = await startLocalProxy(payload.proxy_url);
+  browserProcess = launchNativeBrowser(executablePath, profileRoot, extensionRoot, bridge.startURL, browserProxyURL);
+  await bridge.waitUntilReady(EXTENSION_READY_TIMEOUT_MS);
+  await waitForBrowserExit(browserProcess);
+  await bridge.close();
+  bridge = undefined;
+  await closeLocalProxy();
+  releaseProfileLock();
 } catch (error) {
   const message = safeError(error);
   if (payload?.report_url && payload?.report_token) {
     try { await report('', '', message); } catch { /* The original error is more useful. */ }
   }
   console.error(`S3 Center Connector: ${message}`);
-  releaseProfileLock();
+  await stopResources();
   process.exitCode = 1;
 }
 
@@ -74,24 +68,35 @@ function parseLaunchArgument(raw) {
   const rawTicketURL = launch.searchParams.get('ticket_url');
   if (!rawTicketURL) throw new Error('Connector ticket is missing.');
   const ticketURL = new URL(rawTicketURL);
-  const loopback = ticketURL.hostname === 'localhost' || ticketURL.hostname === '127.0.0.1' || ticketURL.hostname === '::1';
+  const loopback = ['localhost', '127.0.0.1', '::1'].includes(ticketURL.hostname);
   if (ticketURL.protocol !== 'https:' && !(loopback && ticketURL.protocol === 'http:')) {
     throw new Error('Connector tickets must use HTTPS.');
   }
   return ticketURL;
 }
 
-async function fetchJSON(target) {
+async function fetchJSON(target, options = {}) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
-    const response = await fetch(target, {headers: {Accept: 'application/json'}, cache: 'no-store', signal: controller.signal});
+    const response = await fetch(target, {
+      headers: {Accept: 'application/json', ...(options.headers || {})},
+      cache: 'no-store',
+      ...options,
+      signal: controller.signal,
+    });
     const body = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(body.error || `S3 Center returned HTTP ${response.status}.`);
+    if (!response.ok) throw new Error(apiErrorMessage(body, `HTTP ${response.status}`));
     return body;
   } finally {
     clearTimeout(timer);
   }
+}
+
+function apiErrorMessage(body, fallback) {
+  if (typeof body?.error === 'string') return body.error;
+  if (typeof body?.error?.message === 'string') return body.error.message;
+  return fallback;
 }
 
 function validatePayload(value) {
@@ -105,8 +110,8 @@ function validatePayload(value) {
   if (authorization.protocol !== 'https:' || authorization.hostname !== 'dash.cloudflare.com') {
     throw new Error('Refusing an unexpected Cloudflare authorization destination.');
   }
-  const report = new URL(value.report_url);
-  if (report.protocol !== 'https:' && !['localhost', '127.0.0.1', '::1'].includes(report.hostname)) {
+  const reportURL = new URL(value.report_url);
+  if (reportURL.protocol !== 'https:' && !['localhost', '127.0.0.1', '::1'].includes(reportURL.hostname)) {
     throw new Error('Connector report destination must use HTTPS.');
   }
   if (value.proxy_url) parseProxy(value.proxy_url);
@@ -152,11 +157,11 @@ function processIsAlive(pid) {
 
 function releaseProfileLock() {
   if (lockHandle !== undefined) {
-    try { fs.closeSync(lockHandle); } catch { /* already closed */ }
+    try { fs.closeSync(lockHandle); } catch { /* Already closed. */ }
     lockHandle = undefined;
   }
   if (lockPath) {
-    try { fs.unlinkSync(lockPath); } catch { /* already removed */ }
+    try { fs.unlinkSync(lockPath); } catch { /* Already removed. */ }
     lockPath = undefined;
   }
 }
@@ -176,22 +181,69 @@ function locateBrowser() {
   return found;
 }
 
+function assertExtension(extensionRoot) {
+  for (const name of ['manifest.json', 'background.js', 'bootstrap.js', 'panel.js']) {
+    if (!fs.existsSync(path.join(extensionRoot, name))) {
+      throw new Error(`Connector browser extension is incomplete: ${name} is missing.`);
+    }
+  }
+}
+
+function launchNativeBrowser(executablePath, profileRoot, extensionRoot, startURL, browserProxyURL) {
+  const args = [
+    `--user-data-dir=${profileRoot}`,
+    '--new-window',
+    '--start-maximized',
+    '--no-first-run',
+    '--no-default-browser-check',
+    '--disable-background-mode',
+    `--disable-extensions-except=${extensionRoot}`,
+    `--load-extension=${extensionRoot}`,
+    startURL,
+  ];
+  if (browserProxyURL) {
+    args.splice(args.length - 1, 0, `--proxy-server=${browserProxyURL}`, '--proxy-bypass-list=localhost;127.0.0.1');
+  }
+  return spawn(executablePath, args, {stdio: 'ignore', windowsHide: false});
+}
+
+function waitForBrowserExit(child) {
+  return new Promise((resolve, reject) => {
+    child.once('error', reject);
+    child.once('exit', (code, signal) => {
+      if (code && !stopping) {
+        reject(new Error(`The native browser exited unexpectedly (${signal || code}).`));
+        return;
+      }
+      resolve();
+    });
+  });
+}
+
 function parseProxy(raw) {
   const proxy = new URL(raw.includes('://') ? raw : `http://${raw}`);
   if (!['http:', 'https:', 'socks5:', 'socks5h:'].includes(proxy.protocol) || !proxy.hostname) {
     throw new Error('Proxy must use HTTP, HTTPS, SOCKS5, or SOCKS5H.');
   }
+  if ((proxy.pathname && proxy.pathname !== '/') || proxy.search || proxy.hash) {
+    throw new Error('Proxy URL must not contain a path, query, or fragment.');
+  }
   return proxy;
 }
 
-function playwrightProxy(raw) {
-  if (!raw) return undefined;
-  const proxy = parseProxy(raw);
-  const protocol = proxy.protocol === 'socks5h:' ? 'socks5:' : proxy.protocol;
-  const config = {server: `${protocol}//${proxy.host}`};
-  if (proxy.username) config.username = decodeURIComponent(proxy.username);
-  if (proxy.password) config.password = decodeURIComponent(proxy.password);
-  return config;
+async function startLocalProxy(raw) {
+  if (!raw) return '';
+  const upstreamProxyURL = parseProxy(raw).toString();
+  localProxyServer = new ProxyChainServer({
+    host: '127.0.0.1',
+    port: 0,
+    prepareRequestFunction: () => ({requestAuthentication: false, upstreamProxyUrl: upstreamProxyURL}),
+  });
+  await localProxyServer.listen();
+  if (!Number.isInteger(localProxyServer.port) || localProxyServer.port < 1) {
+    throw new Error('Could not allocate the private proxy bridge.');
+  }
+  return `http://127.0.0.1:${localProxyServer.port}`;
 }
 
 function publicProxyEndpoint(raw) {
@@ -200,116 +252,161 @@ function publicProxyEndpoint(raw) {
   return `${proxy.protocol}//${proxy.host}`;
 }
 
-async function verifyBrowserEgress(page) {
-  const response = await page.goto('https://www.cloudflare.com/cdn-cgi/trace', {waitUntil: 'domcontentloaded', timeout: REQUEST_TIMEOUT_MS});
-  if (!response || !response.ok()) throw new Error('Proxy egress check failed; the isolated browser was closed without falling back to a direct connection.');
-  const trace = await page.locator('body').innerText({timeout: 10_000});
-  const match = /^ip=(.+)$/m.exec(trace);
-  if (!match) throw new Error('Cloudflare did not return an exit IP; authorization was stopped.');
-  return match[1].trim();
-}
+async function createBridge() {
+  const nonce = crypto.randomBytes(32).toString('base64url');
+  const bridgeToken = crypto.randomBytes(32).toString('base64url');
+  let resolveReady;
+  let ready = false;
+  const readyPromise = new Promise(resolve => { resolveReady = resolve; });
 
-function validateBootstrapToken(raw) {
-  const token = String(raw || '').trim();
-  if (token.length < 20 || token.length > 512 || /\s/.test(token)) {
-    throw new Error('Paste the API token value displayed after Cloudflare creates the temporary token.');
-  }
-  if (token.startsWith('cfoat_')) {
-    throw new Error('This is an OAuth access token. Use the API token created by the guided Cloudflare page.');
-  }
-  if (!token.startsWith('cfat_')) {
-    throw new Error('Only the Account API Token created by the guided Cloudflare page can be imported.');
-  }
-  return token;
-}
+  const server = http.createServer((request, response) => {
+    void handleBridgeRequest(request, response).catch(error => {
+      if (!response.headersSent) writeBridgeJSON(response, 400, {error: safeError(error)});
+      else response.destroy();
+    });
+  });
+  server.on('clientError', (_error, socket) => socket.end('HTTP/1.1 400 Bad Request\r\n\r\n'));
+  await new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', resolve);
+  });
+  const address = server.address();
+  if (!address || typeof address === 'string') throw new Error('Could not start the private browser bridge.');
+  const origin = `http://127.0.0.1:${address.port}`;
+  const expectedHost = `127.0.0.1:${address.port}`;
 
-function accountIDFromDashboard(rawURL) {
-  const current = new URL(rawURL);
-  if (current.protocol !== 'https:' || current.hostname !== 'dash.cloudflare.com') {
-    throw new Error('The token can only be imported from the Cloudflare dashboard.');
-  }
-  const match = /^\/([a-f0-9]{32})(?:\/|$)/i.exec(current.pathname);
-  if (!match) {
-    throw new Error('Cloudflare account context is unavailable. Finish creating the Account API Token on the guided page first.');
-  }
-  return match[1].toLowerCase();
-}
-
-async function installImportPanel(page) {
-  if (page.isClosed()) return;
-  const current = new URL(page.url());
-  if (current.protocol !== 'https:' || current.hostname !== 'dash.cloudflare.com') return;
-  await page.evaluate(() => {
-    if (document.getElementById('s3-center-import-host')) return;
-    const host = document.createElement('div');
-    host.id = 's3-center-import-host';
-    host.style.cssText = 'all:initial;position:fixed;right:18px;bottom:18px;z-index:2147483647';
-    const root = host.attachShadow({mode: 'open'});
-    root.innerHTML = `
-      <style>
-        *{box-sizing:border-box} .panel{width:min(390px,calc(100vw - 36px));border:1px solid #d7dce2;border-radius:16px;background:#fff;color:#1f2937;box-shadow:0 20px 55px #10182838;font:13px/1.5 Inter,system-ui,sans-serif;overflow:hidden}
-        .head{display:flex;gap:12px;align-items:center;padding:15px 17px;background:linear-gradient(135deg,#fff7ed,#f0fdf4);border-bottom:1px solid #eceff3}.mark{display:grid;place-items:center;width:38px;height:38px;border-radius:11px;background:#f48120;color:#fff;font-weight:800}.title{font-size:14px;font-weight:750}.sub{color:#667085;font-size:12px}
-        .body{padding:15px 17px}.steps{margin:0 0 12px;padding-left:19px;color:#475467}.steps b{color:#1f2937}.field{display:flex;gap:8px}input{min-width:0;flex:1;border:1px solid #cfd6df;border-radius:9px;padding:10px 11px;font:12px ui-monospace,monospace;color:#101828;background:#fff}input:focus{outline:2px solid #f9b77d;border-color:#f48120}
-        button{border:0;border-radius:9px;padding:10px 12px;background:#f48120;color:#fff;font:700 12px system-ui;cursor:pointer}button.secondary{margin-top:8px;width:100%;background:#eef2f6;color:#344054}button:disabled{opacity:.55;cursor:wait}.status{min-height:20px;margin-top:9px;color:#667085;font-size:12px}.status.ok{color:#087a55;font-weight:650}.status.bad{color:#b42318}.note{margin:10px 0 0;color:#98a2b3;font-size:11px}
-      </style>
-      <section class="panel" aria-label="S3 Center Cloudflare connector">
-        <div class="head"><div class="mark">S3</div><div><div class="title">S3 Center 快速接入</div><div class="sub">当前登录与后续 API 固定使用同一代理出口</div></div></div>
-        <div class="body">
-          <ol class="steps"><li>在 Cloudflare 中确认预填权限并创建临时 Token</li><li>复制创建结果中的 <b>API Token</b>，粘贴到下方</li></ol>
-          <form id="import-form"><div class="field"><input id="token" type="password" autocomplete="off" spellcheck="false" placeholder="粘贴一次性 API Token" aria-label="Cloudflare API Token"><button id="submit" type="submit">安全导入</button></div></form>
-          <button id="scan" class="secondary" type="button">自动读取当前页面的新格式 Token</button>
-          <div id="status" class="status" role="status"></div>
-          <p class="note">引导 Token 仅在内存中使用；桶级凭据创建后将自动撤销。若放弃接入，请在 Cloudflare 手动删除该临时 Token。登录 Cookie 不会离开此电脑。</p>
-        </div>
-      </section>`;
-    document.documentElement.appendChild(host);
-    const form = root.getElementById('import-form');
-    const input = root.getElementById('token');
-    const submit = root.getElementById('submit');
-    const scan = root.getElementById('scan');
-    const status = root.getElementById('status');
-
-    const send = async () => {
-      status.className = 'status';
-      status.textContent = '正在经安全通道验证并发现 R2 Bucket…';
-      submit.disabled = true;
-      scan.disabled = true;
-      try {
-        await window.__s3CenterImportBootstrap(input.value);
-        input.value = '';
-        status.className = 'status ok';
-        status.textContent = '导入成功。请返回 S3 Center 选择要接入的 Bucket。';
-      } catch (error) {
-        status.className = 'status bad';
-        status.textContent = error instanceof Error ? error.message : String(error);
-        submit.disabled = false;
-        scan.disabled = false;
-      }
-    };
-    form.addEventListener('submit', event => { event.preventDefault(); void send(); });
-    scan.addEventListener('click', () => {
-      const values = [...document.querySelectorAll('input,textarea,code,pre')]
-        .flatMap(element => [element.value || '', element.textContent || '']);
-      const match = values.join('\n').match(/\bcfat_[A-Za-z0-9_-]{20,}\b/);
-      if (!match) {
-        status.className = 'status bad';
-        status.textContent = '当前页未发现新格式 Token，请创建后复制并粘贴。';
+  async function handleBridgeRequest(request, response) {
+    if (request.headers.host !== expectedHost) {
+      writeBridgeJSON(response, 421, {error: 'Invalid bridge host.'});
+      return;
+    }
+    const requestURL = new URL(request.url || '/', origin);
+    if (request.method === 'GET' && requestURL.pathname === `/start/${nonce}`) {
+      writeBridgeHTML(response, bootstrapPage());
+      return;
+    }
+    if (request.method === 'GET' && requestURL.pathname === `/config/${nonce}`) {
+      ready = true;
+      resolveReady();
+      writeBridgeJSON(response, 200, {
+        authorization_url: payload.authorization_url,
+        bridge_origin: origin,
+        bridge_token: bridgeToken,
+        proxy_enabled: Boolean(payload.proxy_url),
+      });
+      return;
+    }
+    if (request.method === 'POST' && requestURL.pathname === '/event') {
+      if (request.headers.authorization !== `Bearer ${bridgeToken}`) {
+        writeBridgeJSON(response, 401, {error: 'Invalid bridge token.'});
         return;
       }
-      input.value = match[0];
-      void send();
-    });
-  }).catch(() => { /* Navigation can race panel injection; the timer retries. */ });
+      const event = await readBridgeJSON(request);
+      await processBridgeEvent(event);
+      writeBridgeJSON(response, 200, {ok: true});
+      return;
+    }
+    writeBridgeJSON(response, 404, {error: 'Not found.'});
+  }
+
+  return {
+    startURL: `${origin}/start/${nonce}`,
+    waitUntilReady(timeout) {
+      if (ready) return Promise.resolve();
+      return Promise.race([
+        readyPromise,
+        new Promise((_, reject) => setTimeout(() => reject(new Error('The native browser helper extension did not start. Reinstall the latest connector and try again.')), timeout)),
+      ]);
+    },
+    close() {
+      return new Promise(resolve => server.close(() => resolve()));
+    },
+  };
+}
+
+async function readBridgeJSON(request) {
+  const chunks = [];
+  let size = 0;
+  for await (const chunk of request) {
+    size += chunk.length;
+    if (size > MAX_BRIDGE_BODY_BYTES) throw new Error('Bridge event is too large.');
+    chunks.push(chunk);
+  }
+  try {
+    return JSON.parse(Buffer.concat(chunks).toString('utf8'));
+  } catch {
+    throw new Error('Bridge event is invalid.');
+  }
+}
+
+async function processBridgeEvent(event) {
+  if (!event || typeof event.type !== 'string') throw new Error('Bridge event type is missing.');
+  switch (event.type) {
+    case 'proxy_verified': {
+      const exitIP = String(event.exit_ip || '').trim();
+      if (!net.isIP(exitIP)) throw new Error('Cloudflare did not return a valid browser exit IP.');
+      await report('proxy_verified', exitIP);
+      return;
+    }
+    case 'browser_open':
+      await report('browser_open', String(event.exit_ip || '').trim());
+      return;
+    case 'bootstrap_token':
+      await report('bootstrap_token', String(event.exit_ip || '').trim(), '', event.bootstrap_token, event.account_id);
+      return;
+    case 'error':
+      await report('', '', String(event.error || 'The native browser connector failed.'));
+      return;
+    case 'heartbeat':
+      return;
+    default:
+      throw new Error('Unsupported bridge event.');
+  }
+}
+
+function writeBridgeJSON(response, status, value) {
+  const body = Buffer.from(JSON.stringify(value));
+  response.writeHead(status, {
+    'Cache-Control': 'no-store',
+    'Content-Type': 'application/json; charset=utf-8',
+    'Content-Length': body.length,
+    'X-Content-Type-Options': 'nosniff',
+  });
+  response.end(body);
+}
+
+function writeBridgeHTML(response, markup) {
+  const body = Buffer.from(markup);
+  response.writeHead(200, {
+    'Cache-Control': 'no-store',
+    'Content-Type': 'text/html; charset=utf-8',
+    'Content-Length': body.length,
+    'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'",
+    'X-Content-Type-Options': 'nosniff',
+  });
+  response.end(body);
+}
+
+function bootstrapPage() {
+  return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>S3 Center 原生 Cloudflare 登录</title><style>
+    :root{color-scheme:dark}*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;background:#07100f;color:#eaf5f0;font:15px/1.65 system-ui,sans-serif}.card{width:min(620px,calc(100% - 36px));padding:38px;border:1px solid #29463e;border-radius:22px;background:#0f1d1b;box-shadow:0 24px 80px #0007}.eyebrow{color:#72e6b4;font:700 12px ui-monospace,monospace;letter-spacing:.17em}h1{margin:14px 0 8px;font-size:clamp(27px,6vw,39px);line-height:1.15}p{color:#b8ccc4}.status{margin-top:24px;padding:14px 16px;border-radius:12px;background:#122a25;color:#8ef0c5}.note{font-size:13px;color:#809a91}
+  </style></head><body><main class="card"><div class="eyebrow">S3 CENTER · NATIVE BROWSER</div><h1>正在准备 Cloudflare 安全登录</h1><p>此窗口由原生 Edge / Chrome 打开，没有使用 Playwright、Selenium 或远程调试。独立 Profile 与专属代理正在初始化。</p><p id="bridge-status" class="status">正在载入本机安全助手，随后会自动进入 Cloudflare 官方页面…</p><p class="note">若此页面停留超过 45 秒，请关闭窗口，从管理端重新下载并安装最新版 Connector。</p></main></body></html>`;
 }
 
 async function report(status, exitIP = '', error = '', bootstrapToken = '', accountID = '') {
-  const response = await fetch(payload.report_url, {
+  await fetchJSON(payload.report_url, {
     method: 'POST',
-    headers: {'Content-Type': 'application/json', Accept: 'application/json'},
-    body: JSON.stringify({token: payload.report_token, status, exit_ip: exitIP, error, account_id: accountID, bootstrap_token: bootstrapToken}),
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      token: payload.report_token,
+      connector_version: CONNECTOR_PROTOCOL_VERSION,
+      status,
+      exit_ip: exitIP,
+      error,
+      account_id: accountID,
+      bootstrap_token: bootstrapToken,
+    }),
   });
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(body.error || `Could not report connector state (HTTP ${response.status}).`);
 }
 
 function safeError(error) {
@@ -318,6 +415,26 @@ function safeError(error) {
   return text.replaceAll(payload.proxy_url, publicProxyEndpoint(payload.proxy_url)).slice(0, 500);
 }
 
-process.on('SIGINT', () => { releaseProfileLock(); process.exit(130); });
-process.on('SIGTERM', () => { releaseProfileLock(); process.exit(143); });
+async function closeLocalProxy() {
+  if (!localProxyServer) return;
+  try { await localProxyServer.close(true); } catch { /* Already closed. */ }
+  localProxyServer = undefined;
+}
+
+async function stopResources() {
+  if (stopping) return;
+  stopping = true;
+  if (browserProcess && browserProcess.exitCode === null) {
+    try { browserProcess.kill(); } catch { /* Already closed. */ }
+  }
+  if (bridge) {
+    try { await bridge.close(); } catch { /* Already closed. */ }
+    bridge = undefined;
+  }
+  await closeLocalProxy();
+  releaseProfileLock();
+}
+
+process.on('SIGINT', () => { void stopResources().finally(() => process.exit(130)); });
+process.on('SIGTERM', () => { void stopResources().finally(() => process.exit(143)); });
 process.on('exit', releaseProfileLock);

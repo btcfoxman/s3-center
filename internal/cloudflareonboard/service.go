@@ -28,6 +28,9 @@ const (
 	defaultAPIBaseURL       = "https://api.cloudflare.com/client/v4"
 	bootstrapCredentialName = "S3 Center temporary onboarding" //nolint:gosec // Public display label, not a credential.
 	bootstrapPermissions    = `[{"key":"account_api_tokens","type":"edit"},{"key":"account_settings","type":"read"},{"key":"workers_r2","type":"edit"}]`
+	// ConnectorProtocolVersion rejects the former Playwright-based launcher,
+	// because Cloudflare does not support automated browsers for production challenges.
+	ConnectorProtocolVersion = "native-browser-v1"
 )
 
 var (
@@ -126,12 +129,13 @@ type ConnectorPayload struct {
 // from the local agent. BootstrapToken is consumed into server memory only and
 // never included in a SessionView or log record.
 type ConnectorReport struct {
-	Token          string `json:"token"`
-	Status         string `json:"status"`
-	ExitIP         string `json:"exit_ip"`
-	Error          string `json:"error"`
-	AccountID      string `json:"account_id,omitempty"`
-	BootstrapToken string `json:"bootstrap_token,omitempty"`
+	Token            string `json:"token"`
+	ConnectorVersion string `json:"connector_version"`
+	Status           string `json:"status"`
+	ExitIP           string `json:"exit_ip"`
+	Error            string `json:"error"`
+	AccountID        string `json:"account_id,omitempty"`
+	BootstrapToken   string `json:"bootstrap_token,omitempty"`
 }
 
 // Bucket is a selectable R2 bucket discovered with the one-time bootstrap
@@ -361,6 +365,12 @@ func (s *Service) ReportConnector(ctx context.Context, report *ConnectorReport) 
 	if item == nil {
 		s.mu.Unlock()
 		return errors.New("connector session no longer exists")
+	}
+	if report.ConnectorVersion != ConnectorProtocolVersion {
+		item.Status = "error"
+		item.LastError = "本机 Connector 版本过旧：Cloudflare 不支持旧版自动化浏览器登录，请重新下载并安装 Connector 2.0"
+		s.mu.Unlock()
+		return errors.New("local connector is outdated; install Connector 2.0 and start a new onboarding session")
 	}
 	if item.Status != "waiting_connector" && item.Status != "opening_browser" && item.Status != "waiting_authorization" {
 		s.mu.Unlock()
