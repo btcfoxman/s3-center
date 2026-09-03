@@ -20,9 +20,9 @@ import (
 )
 
 // Keep runtime dependencies out of the binary: only the redistributable
-// connector sources and its bundled helper extension belong in the ZIP.
+// connector sources belong in the downloadable ZIP.
 //
-//go:embed templates/*.html static/* connector/*.mjs connector/*.cmd connector/*.ps1 connector/*.json connector/*.md connector/extension/*
+//go:embed templates/*.html static/* connector/*.mjs connector/*.cmd connector/*.ps1 connector/*.json connector/*.md
 var embeddedFS embed.FS
 
 // staticFS is the rooted view of the embedded static/ directory used

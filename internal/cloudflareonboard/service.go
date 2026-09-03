@@ -28,9 +28,9 @@ const (
 	defaultAPIBaseURL       = "https://api.cloudflare.com/client/v4"
 	bootstrapCredentialName = "S3 Center temporary onboarding" //nolint:gosec // Public display label, not a credential.
 	bootstrapPermissions    = `[{"key":"account_api_tokens","type":"edit"},{"key":"account_settings","type":"read"},{"key":"workers_r2","type":"edit"}]`
-	// ConnectorProtocolVersion rejects the former Playwright-based launcher,
-	// because Cloudflare does not support automated browsers for production challenges.
-	ConnectorProtocolVersion = "native-browser-v1"
+	// ConnectorProtocolVersion rejects launchers that use automation or let Edge
+	// implicit sign-in attach local browser identity to an isolated CF profile.
+	ConnectorProtocolVersion = "native-browser-v2"
 )
 
 var (
@@ -368,9 +368,9 @@ func (s *Service) ReportConnector(ctx context.Context, report *ConnectorReport) 
 	}
 	if report.ConnectorVersion != ConnectorProtocolVersion {
 		item.Status = "error"
-		item.LastError = "本机 Connector 版本过旧：Cloudflare 不支持旧版自动化浏览器登录，请重新下载并安装 Connector 2.0"
+		item.LastError = "本机 Connector 版本过旧：请重新下载并安装 Connector 2.1；新版使用专用 Chrome Profile，禁止 Edge 隐式登录串入本机账号"
 		s.mu.Unlock()
-		return errors.New("local connector is outdated; install Connector 2.0 and start a new onboarding session")
+		return errors.New("local connector is outdated; install Connector 2.1 and start a new onboarding session")
 	}
 	if item.Status != "waiting_connector" && item.Status != "opening_browser" && item.Status != "waiting_authorization" {
 		s.mu.Unlock()

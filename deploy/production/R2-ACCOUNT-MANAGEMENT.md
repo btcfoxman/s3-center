@@ -8,16 +8,16 @@
 
 管理员不再需要手工寻找 Account ID、R2 Access Key 和 Secret。登录管理端，在 **Cloudflare 账号额度** 区域点击 **新增 CF 身份**：
 
-1. 首次使用先下载 Connector 2.0 ZIP，解压后运行 `powershell -ExecutionPolicy Bypass -File .\install.ps1`。它只为当前 Windows 用户注册 `s3center://`，不需要管理员权限。若曾安装 1.x，也必须运行一次新版安装脚本；既有 Profile 与 Cookie 会保留。
+1. 首次使用先下载 Connector 2.1 ZIP，解压后运行 `powershell -ExecutionPolicy Bypass -File .\install.ps1`。它只为当前 Windows 用户注册 `s3center://`，不需要管理员权限，并要求安装最新 Google Chrome。若曾安装旧版，也必须运行一次新版安装脚本；旧 Profile 会保留以便恢复，但 2.1 不会再打开它。
 2. 填写身份备注，以及该 CF 身份固定使用的代理（HTTP、HTTPS、SOCKS5/SOCKS5H，均可含用户名密码）。
 3. 点击 **创建隔离登录**，再点击 **打开隔离 Cloudflare 登录**。
-4. Connector 在 `%LOCALAPPDATA%\S3Center\Profiles\<profile-id>` 启动真正的原生 Edge/Chrome 进程，不附加 Playwright、WebDriver 或远程调试。代理凭据由 Connector 内存中的随机本机转发端口承接，随包的最小 Manifest V3 辅助扩展访问 Cloudflare trace 校验出口 IP；代理失败会终止，不会回退本机直连。
-5. 在新窗口登录对应 CF 身份。Connector 会打开 Cloudflare 官方的 Account API Token 预填页面，权限和名称均已填好；确认创建后，复制页面只显示一次的 **API Token**，粘贴到页面右下角的 S3 Center 面板并点击 **安全导入**。Connector 会从当前 Cloudflare 官方页面自动取得 Account ID，无需手工寻找或填写。
+4. Connector 在 `%LOCALAPPDATA%\S3Center\Profiles\<profile-id>\browser-chrome-v1` 启动真正的原生 Chrome 进程，不使用本机默认 Profile、Edge、Playwright、WebDriver 或远程调试。新 Profile 初始不绑定浏览器账号，并关闭同步、首次启动资料导入、扩展和密码保存。代理凭据由 Connector 内存中的随机本机转发端口承接，本机控制页经同一路由访问 Cloudflare trace 校验出口 IP；代理失败会终止，不会回退本机直连。
+5. 在本机控制页点击 **打开 Cloudflare 官方页面**，在新标签页登录对应 CF 身份。预填页面的权限和名称已填好；确认创建后，复制只显示一次的 **API Token**，并把 Token 与当前 Cloudflare Account 页面地址粘贴回本机控制页。Connector 会从地址中取得 Account ID，再经随机 `127.0.0.1` 桥接安全导入。
 6. 服务端通过同一代理验证这个临时引导 Token，并列出所选 Account 的 R2 Bucket。选择一个 Bucket 后，系统创建只允许该 Bucket 读写的 R2 S3 凭据、验证连接、加密落库，最后自动撤销引导 Token。
 
 每个登录身份拥有独立 Cookie、Profile ID 和代理绑定，不会与另一个 CF 身份共用浏览器状态。自定义 URI 里只有一次性票据，没有代理密码；票据兑换响应禁止缓存且只能读取一次。Profile 元数据只记录脱敏的代理 endpoint，不记录代理认证信息。
 
-> Connector 1.x 曾通过 Playwright 启动浏览器。Cloudflare 的生产验证明确不支持自动化浏览器，可能在登录时显示 `There was a problem with verification`。Connector 2.0 已完全移除 Playwright 运行时；辅助扩展在登录页不注入界面，只有 URL 进入具体 Account 后才显示 Token 导入面板。
+> Connector 1.x 曾通过 Playwright 启动浏览器。Cloudflare 的生产验证明确不支持自动化浏览器，可能在登录时显示 `There was a problem with verification`。Connector 2.0 虽已移除 Playwright，但 Edge 仍可能根据 Windows 登录自动绑定本机 Microsoft 账号。Connector 2.1 因此改为全新的 Chrome-only Profile，并使用独立本机控制页；不再加载扩展，也不观察或修改 Cloudflare 登录页。
 
 临时引导 Token 只存在于服务端内存中的短期会话（生产默认 20 分钟），不写数据库或日志。完成选择后，系统使用它创建一个仅限目标 Bucket 的 Account-owned R2 Token，将 R2 Access Key / Secret 和代理整体加密保存，然后通过 Cloudflare API 撤销引导 Token 并从内存清除。创建后端失败时，刚创建的 Bucket Token 会自动撤销，引导 Token 保留到当前会话结束以便重试；若放弃流程，应在 Cloudflare Account API Tokens 页面手动撤销 `S3 Center temporary onboarding`。
 
@@ -33,7 +33,11 @@ Cloudflare 的公共 OAuth scope 目录当前不暴露 `Account API Tokens Write
 
 ### 登录验证仍失败时
 
-先确认安装输出明确显示 `Connector 2.0`，关闭旧版打开的失败窗口，并从管理端创建一条全新的接入会话（旧 ticket 不能重复使用）。仍失败时先用直连测试；若直连正常而某个代理失败，说明该代理可能在登录过程中轮换 IP、拦截 TLS/挑战脚本，或出口信誉不足，应更换稳定代理。隔离 Profile 不应安装广告拦截、脚本拦截、指纹防护或自动切换代理的扩展。
+先确认安装输出明确显示 `Connector 2.1`，关闭旧版打开的所有窗口，并从管理端创建一条全新的接入会话（旧 ticket 不能重复使用）。新窗口应为 Chrome，Profile 名称以 `S3 Center` 开头，并且不显示本机浏览器账号。仍失败时先用直连测试；若直连正常而某个代理失败，说明该代理可能在登录过程中轮换 IP、拦截 TLS/挑战脚本，或出口信誉不足，应更换稳定代理。隔离 Profile 不应安装广告拦截、脚本拦截、指纹防护或自动切换代理的扩展。
+
+### 创建桶级凭据时报策略复用错误
+
+Cloudflare 创建 Token 时，`policies[].id` 是服务端生成的响应字段，不应在新建请求中自行提供；否则会返回 `Reusing existing policies is not supported by token creation`。当前实现只提交新的 `effect`、`permission_groups` 与 Bucket `resources`，由 Cloudflare 分配策略 ID。
 
 ## 备选：手动凭据接入
 

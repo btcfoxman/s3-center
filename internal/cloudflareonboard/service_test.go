@@ -91,6 +91,15 @@ func newCloudflareFixture(t *testing.T) *cloudflareFixture {
 			if err := json.NewDecoder(r.Body).Decode(&fixture.createBody); err != nil {
 				t.Errorf("decode create body: %v", err)
 			}
+			policy := fixture.createBody["policies"].([]any)[0].(map[string]any)
+			if _, exists := policy["id"]; exists {
+				w.WriteHeader(http.StatusBadRequest)
+				writeFixtureJSON(t, w, map[string]any{
+					"success": false,
+					"errors":  []map[string]any{{"code": 1000, "message": "Reusing existing policies is not supported by token creation"}},
+				})
+				return
+			}
 			writeFixtureJSON(t, w, apiEnvelopeBody(map[string]string{"id": testTokenID, "value": testGeneratedSecret}, map[string]any{}))
 		case strings.HasPrefix(r.URL.Path, "/api/accounts/"+testAccountID+"/tokens/") && r.Method == http.MethodDelete:
 			assertBearer(t, r)
@@ -178,12 +187,16 @@ func TestBrowserOnboardingEndToEndAndSecretBoundaries(t *testing.T) {
 		t.Fatalf("browser bootstrap and provisioning did not share the bound proxy: %v", proxies)
 	}
 	fixture.mu.Lock()
-	resource := fixture.createBody["policies"].([]any)[0].(map[string]any)["resources"].(map[string]any)
+	policy := fixture.createBody["policies"].([]any)[0].(map[string]any)
+	resource := policy["resources"].(map[string]any)
+	_, reusesPolicy := policy["id"]
+	permission := policy["permission_groups"].([]any)[0].(map[string]any)
+	_, sendsPermissionName := permission["name"]
 	bootstrapRevoked := fixture.deletedIDs[testBootstrapID]
 	fixture.mu.Unlock()
 	wantResource := "com.cloudflare.edge.r2.bucket." + testAccountID + "_default_media-assets"
-	if resource[wantResource] != "*" || !bootstrapRevoked {
-		t.Fatalf("bucket token resource = %#v, bootstrap revoked = %v", resource, bootstrapRevoked)
+	if resource[wantResource] != "*" || reusesPolicy || sendsPermissionName || !bootstrapRevoked {
+		t.Fatalf("bucket token policy = %#v, bootstrap revoked = %v", policy, bootstrapRevoked)
 	}
 }
 
@@ -231,14 +244,14 @@ func TestConnectorRejectsLegacyAutomatedBrowserVersion(t *testing.T) {
 	err = service.ReportConnector(context.Background(), &ConnectorReport{
 		Token: payload.ReportToken, Status: "proxy_verified", ExitIP: "203.0.113.9",
 	})
-	if err == nil || !strings.Contains(err.Error(), "Connector 2.0") {
+	if err == nil || !strings.Contains(err.Error(), "Connector 2.1") {
 		t.Fatalf("legacy connector error = %v", err)
 	}
 	view, statusErr := service.Status(started.Session.ID)
 	if statusErr != nil {
 		t.Fatal(statusErr)
 	}
-	if view.Status != "error" || !strings.Contains(view.Error, "Connector 2.0") {
+	if view.Status != "error" || !strings.Contains(view.Error, "Connector 2.1") {
 		t.Fatalf("legacy connector session = %+v", view)
 	}
 }

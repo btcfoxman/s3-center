@@ -17,17 +17,17 @@ import (
 
 const maxOnboardingBodyBytes = 32 << 10
 
-const cloudflareConnectorPackageVersion = "2.0.0"
+const cloudflareConnectorPackageVersion = "2.1.0"
 
 var cloudflareConnectorInfoPage = []byte(`<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width">
 <title>S3 Center Cloudflare 原生隔离连接器</title><style>
 body{margin:0;background:#07100f;color:#eaf5f0;font:15px/1.75 system-ui}.wrap{width:min(780px,calc(100% - 40px));margin:64px auto}.brand{color:#ff9b52;font:700 12px ui-monospace;letter-spacing:.18em}.card{margin-top:20px;padding:clamp(24px,5vw,48px);border:1px solid #29463e;border-radius:24px;background:#0f1d1b}h1{font-size:36px;line-height:1.15}h2{margin-top:30px;font-size:18px;color:#9af5cf}p,li{color:#b8ccc4}code{color:#ffad70}
 </style></head><body><main class="wrap"><div class="brand">S3 CENTER / CLOUDFLARE</div><article class="card">
-<h1>Cloudflare R2 原生隔离浏览器连接器</h1>
-<p>Connector 2.0 为每个 Cloudflare 身份启动独立的原生 Edge/Chrome Profile，并可绑定专属 HTTP、HTTPS 或 SOCKS5 代理。它不使用 Playwright、WebDriver 或远程调试，因此可以正常完成 Cloudflare 生产环境登录验证。Cloudflare 登录 Cookie 只保存在该 Profile，不会上传到 S3 Center。</p>
-<h2>接入方式</h2><p>Cloudflare 公共 OAuth 不提供创建 Account API Token 所需的权限，因此连接器会打开 Cloudflare 官方预填 Token 页面。管理员确认后，将页面显示的一次性引导 Token 通过加密 HTTPS 通道提交；S3 Center 经同一代理发现 R2 Bucket、创建仅限所选 Bucket 的凭据，并自动撤销引导 Token。</p>
-<h2>数据与安全边界</h2><ul><li>本机辅助扩展在登录验证阶段不修改 Cloudflare 页面；仅在选定具体 Account 后显示 Token 导入面板。</li><li>代理认证与本机桥接密钥只驻留浏览器会话内存；引导 Token 只存在于短期服务端内存，不写入数据库或日志。</li><li>持久化内容仅包括加密后的 Bucket 级凭据、账号标识、代理设置及非敏感 Profile ID。</li><li>文件上传、下载与预签名访问均由调用方直接连接上游 R2；S3 Center 只承担索引、授权、额度决策和控制面调用。</li></ul>
+<h1>Cloudflare R2 专用 Chrome 隔离连接器</h1>
+<p>Connector 2.1 为每个 Cloudflare 身份启动全新的 S3 Center 专用 Chrome Profile，并可绑定专属 HTTP、HTTPS 或 SOCKS5 代理。它不使用本机默认浏览器 Profile、Edge 隐式登录、Playwright、WebDriver 或远程调试；新 Profile 初始不绑定浏览器账号，并关闭同步、资料导入、扩展和密码保存。Cloudflare 登录 Cookie 只保存在对应的隔离 Profile，不会上传到 S3 Center。</p>
+<h2>接入方式</h2><p>Cloudflare 公共 OAuth 不提供创建 Account API Token 所需的权限，因此连接器提供随机的本机控制页，并从那里打开 Cloudflare 官方预填 Token 页面。管理员确认创建后，将只显示一次的引导 Token 和当前 Account 页面地址粘贴回控制页；S3 Center 经同一代理发现 R2 Bucket、创建仅限所选 Bucket 的凭据，并自动撤销引导 Token。</p>
+<h2>数据与安全边界</h2><ul><li>连接器不加载浏览器扩展，也不观察或修改 Cloudflare 登录页；本机控制页只绑定随机的 <code>127.0.0.1</code> 地址。</li><li>代理认证与本机桥接密钥只驻留 Connector 会话内存；引导 Token 只存在于短期服务端内存，不写入浏览器磁盘、数据库或日志。</li><li>持久化内容仅包括加密后的 Bucket 级凭据、账号标识、代理设置及非敏感 Profile ID。</li><li>文件上传、下载与预签名访问均由调用方直接连接上游 R2；S3 Center 只承担索引、授权、额度决策和控制面调用。</li></ul>
 <h2>使用条款</h2><p>仅连接你有权管理的 Cloudflare 账号。如页面提示自动撤销失败，或创建 Token 后放弃接入流程，应立即在 Cloudflare 的 Account API Tokens 页面手动撤销名为 <code>S3 Center temporary onboarding</code> 的 Token。</p>
 <p>Publisher: <code>s3-center.aiid.qzz.io</code></p></article></main></body></html>`)
 

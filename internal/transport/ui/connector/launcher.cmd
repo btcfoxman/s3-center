@@ -1,6 +1,6 @@
 @echo off
 setlocal
-title S3 Center Cloudflare Connector 2.0
+title S3 Center Cloudflare Connector 2.1
 cd /d "%~dp0"
 node connector.mjs "%~1"
 if errorlevel 1 (

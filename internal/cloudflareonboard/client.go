@@ -149,20 +149,14 @@ func (s *Service) createBucketToken(
 	if err != nil {
 		return "", "", err
 	}
-	policyID, err := randomID("", 16)
-	if err != nil {
-		return "", "", err
-	}
 	jurisdiction := firstNonEmpty(bucket.Jurisdiction, "default")
 	resource := "com.cloudflare.edge.r2.bucket." + account.ID + "_" + jurisdiction + "_" + bucket.Name
 	body := map[string]any{
 		"name": fmt.Sprintf("s3-center/%s/%s", truncate(account.Name, 48), truncate(bucket.Name, 48)),
 		"policies": []any{map[string]any{
-			"id": policyID, "effect": "allow",
-			"resources": map[string]string{resource: "*"},
-			"permission_groups": []any{map[string]string{
-				"id": permissionID, "name": "Workers R2 Storage Bucket Item Write",
-			}},
+			"effect":            "allow",
+			"resources":         map[string]string{resource: "*"},
+			"permission_groups": []any{map[string]string{"id": permissionID}},
 		}},
 	}
 	var envelope apiEnvelope[createdToken]

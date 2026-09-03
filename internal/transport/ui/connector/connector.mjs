@@ -6,15 +6,16 @@ import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
 import {spawn} from 'node:child_process';
-import {fileURLToPath} from 'node:url';
 import {Server as ProxyChainServer} from 'proxy-chain';
 
-const CONNECTOR_PROTOCOL_VERSION = 'native-browser-v1';
+const CONNECTOR_PROTOCOL_VERSION = 'native-browser-v2';
+const ISOLATED_BROWSER_PROFILE = 'browser-chrome-v1';
 const PROFILE_PATTERN = /^cf-[a-f0-9]{16}$/;
 const IDENTITY_PATTERN = /^cfi-[a-f0-9]{24}$/;
 const REQUEST_TIMEOUT_MS = 30_000;
-const EXTENSION_READY_TIMEOUT_MS = 45_000;
+const BROWSER_READY_TIMEOUT_MS = 45_000;
 const MAX_BRIDGE_BODY_BYTES = 16 << 10;
+const MAX_TRACE_BODY_BYTES = 64 << 10;
 
 let payload;
 let lockPath;
@@ -30,20 +31,21 @@ try {
   validatePayload(payload);
 
   const localRoot = process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local');
-  const profileRoot = path.join(localRoot, 'S3Center', 'Profiles', payload.profile_id);
-  fs.mkdirSync(profileRoot, {recursive: true});
-  assertProfileBinding(profileRoot, payload);
-  ({lockPath, lockHandle} = acquireProfileLock(profileRoot));
+  const identityRoot = path.join(localRoot, 'S3Center', 'Profiles', payload.profile_id);
+  fs.mkdirSync(identityRoot, {recursive: true});
+  assertProfileBinding(identityRoot, payload);
+  ({lockPath, lockHandle} = acquireProfileLock(identityRoot));
 
   const executablePath = locateBrowser();
-  const connectorRoot = path.dirname(fileURLToPath(import.meta.url));
-  const extensionRoot = path.join(connectorRoot, 'extension');
-  assertExtension(extensionRoot);
+  const profileRoot = path.join(identityRoot, ISOLATED_BROWSER_PROFILE);
+  initializeBrowserProfile(profileRoot, payload.profile_id);
 
-  bridge = await createBridge();
   const browserProxyURL = await startLocalProxy(payload.proxy_url);
-  browserProcess = launchNativeBrowser(executablePath, profileRoot, extensionRoot, bridge.startURL, browserProxyURL);
-  await bridge.waitUntilReady(EXTENSION_READY_TIMEOUT_MS);
+  const exitIP = await verifyBrowserRoute(browserProxyURL);
+  await report('proxy_verified', exitIP);
+  bridge = await createBridge(exitIP);
+  browserProcess = launchNativeBrowser(executablePath, profileRoot, bridge.startURL, browserProxyURL);
+  await bridge.waitUntilReady(BROWSER_READY_TIMEOUT_MS);
   await waitForBrowserExit(browserProcess);
   await bridge.close();
   bridge = undefined;
@@ -167,38 +169,71 @@ function releaseProfileLock() {
 }
 
 function locateBrowser() {
+  if (process.env.S3CENTER_BROWSER_PATH) {
+    const configured = path.resolve(process.env.S3CENTER_BROWSER_PATH);
+    if (!fs.existsSync(configured)) {
+      throw new Error('S3CENTER_BROWSER_PATH does not point to an installed browser.');
+    }
+    if (path.basename(configured).toLowerCase() !== 'chrome.exe') {
+      throw new Error('Connector 2.1 requires Google Chrome for strong account isolation. S3CENTER_BROWSER_PATH must point to chrome.exe.');
+    }
+    return configured;
+  }
   const candidates = [
-    process.env.S3CENTER_BROWSER_PATH,
-    process.env.PROGRAMFILES && path.join(process.env.PROGRAMFILES, 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
-    process.env['PROGRAMFILES(X86)'] && path.join(process.env['PROGRAMFILES(X86)'], 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
-    process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
     process.env.PROGRAMFILES && path.join(process.env.PROGRAMFILES, 'Google', 'Chrome', 'Application', 'chrome.exe'),
     process.env['PROGRAMFILES(X86)'] && path.join(process.env['PROGRAMFILES(X86)'], 'Google', 'Chrome', 'Application', 'chrome.exe'),
     process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, 'Google', 'Chrome', 'Application', 'chrome.exe'),
   ].filter(Boolean);
   const found = candidates.find(candidate => fs.existsSync(candidate));
-  if (!found) throw new Error('Microsoft Edge or Google Chrome was not found. Set S3CENTER_BROWSER_PATH to the browser executable.');
+  if (!found) {
+    throw new Error('Connector 2.1 requires an up-to-date Google Chrome. Edge is not used because Windows implicit sign-in can attach the local Microsoft account to a new Edge profile.');
+  }
   return found;
 }
 
-function assertExtension(extensionRoot) {
-  for (const name of ['manifest.json', 'background.js', 'bootstrap.js', 'panel.js']) {
-    if (!fs.existsSync(path.join(extensionRoot, name))) {
-      throw new Error(`Connector browser extension is incomplete: ${name} is missing.`);
-    }
+function initializeBrowserProfile(profileRoot, profileID) {
+  const defaultRoot = path.join(profileRoot, 'Default');
+  const preferencesPath = path.join(defaultRoot, 'Preferences');
+  fs.mkdirSync(defaultRoot, {recursive: true});
+  if (!fs.existsSync(preferencesPath)) {
+    const preferences = {
+      browser: {
+        check_default_browser: false,
+        has_seen_welcome_page: true,
+      },
+      credentials_enable_service: false,
+      distribution: {
+        do_not_create_any_shortcuts: true,
+        import_bookmarks: false,
+        import_history: false,
+        import_search_engine: false,
+        make_chrome_default: false,
+        skip_first_run_ui: true,
+      },
+      profile: {
+        name: `S3 Center ${profileID.slice(-6)}`,
+        password_manager_enabled: false,
+      },
+      sync: {requested: false},
+    };
+    fs.writeFileSync(preferencesPath, `${JSON.stringify(preferences, null, 2)}\n`, {encoding: 'utf8', mode: 0o600});
   }
+  const firstRunMarker = path.join(profileRoot, 'First Run');
+  if (!fs.existsSync(firstRunMarker)) fs.writeFileSync(firstRunMarker, '', {mode: 0o600});
 }
 
-function launchNativeBrowser(executablePath, profileRoot, extensionRoot, startURL, browserProxyURL) {
+function launchNativeBrowser(executablePath, profileRoot, startURL, browserProxyURL) {
   const args = [
     `--user-data-dir=${profileRoot}`,
+    '--profile-directory=Default',
     '--new-window',
     '--start-maximized',
     '--no-first-run',
     '--no-default-browser-check',
     '--disable-background-mode',
-    `--disable-extensions-except=${extensionRoot}`,
-    `--load-extension=${extensionRoot}`,
+    '--disable-default-apps',
+    '--disable-sync',
+    '--disable-extensions',
     startURL,
   ];
   if (browserProxyURL) {
@@ -246,18 +281,68 @@ async function startLocalProxy(raw) {
   return `http://127.0.0.1:${localProxyServer.port}`;
 }
 
+async function verifyBrowserRoute(browserProxyURL) {
+  const trace = await fetchCloudflareTrace(browserProxyURL);
+  const match = /^ip=(.+)$/m.exec(trace);
+  const exitIP = match?.[1]?.trim() || '';
+  if (!net.isIP(exitIP)) throw new Error('Cloudflare did not return a valid proxy exit IP.');
+  return exitIP;
+}
+
+function fetchCloudflareTrace(browserProxyURL) {
+  return new Promise((resolve, reject) => {
+    const target = 'http://www.cloudflare.com/cdn-cgi/trace';
+    const proxy = browserProxyURL ? new URL(browserProxyURL) : undefined;
+    const request = http.get({
+      hostname: proxy?.hostname || 'www.cloudflare.com',
+      port: proxy?.port || 80,
+      path: proxy ? target : '/cdn-cgi/trace',
+      headers: {
+        Accept: 'text/plain',
+        Connection: 'close',
+        Host: 'www.cloudflare.com',
+        'User-Agent': 'S3-Center-Connector/2.1',
+      },
+      timeout: REQUEST_TIMEOUT_MS,
+    }, response => {
+      const chunks = [];
+      let size = 0;
+      response.on('data', chunk => {
+        size += chunk.length;
+        if (size > MAX_TRACE_BODY_BYTES) {
+          request.destroy(new Error('Cloudflare trace response is too large.'));
+          return;
+        }
+        chunks.push(chunk);
+      });
+      response.on('end', () => {
+        if (response.statusCode !== 200) {
+          reject(new Error(`Cloudflare proxy verification returned HTTP ${response.statusCode || 0}.`));
+          return;
+        }
+        resolve(Buffer.concat(chunks).toString('utf8'));
+      });
+    });
+    request.once('timeout', () => request.destroy(new Error('Cloudflare proxy verification timed out.')));
+    request.once('error', reject);
+  });
+}
+
 function publicProxyEndpoint(raw) {
   if (!raw) return 'direct';
   const proxy = parseProxy(raw);
   return `${proxy.protocol}//${proxy.host}`;
 }
 
-async function createBridge() {
+async function createBridge(exitIP) {
   const nonce = crypto.randomBytes(32).toString('base64url');
   const bridgeToken = crypto.randomBytes(32).toString('base64url');
+  const scriptNonce = crypto.randomBytes(24).toString('base64url');
   let resolveReady;
+  let rejectReady;
   let ready = false;
-  const readyPromise = new Promise(resolve => { resolveReady = resolve; });
+  let browserReported = false;
+  const readyPromise = new Promise((resolve, reject) => { resolveReady = resolve; rejectReady = reject; });
 
   const server = http.createServer((request, response) => {
     void handleBridgeRequest(request, response).catch(error => {
@@ -282,22 +367,32 @@ async function createBridge() {
     }
     const requestURL = new URL(request.url || '/', origin);
     if (request.method === 'GET' && requestURL.pathname === `/start/${nonce}`) {
-      writeBridgeHTML(response, bootstrapPage());
+      writeBridgeHTML(response, bootstrapPage({nonce, bridgeToken, scriptNonce, exitIP}), scriptNonce);
       return;
     }
-    if (request.method === 'GET' && requestURL.pathname === `/config/${nonce}`) {
+    if (request.method === 'POST' && requestURL.pathname === `/ready/${nonce}`) {
+      if (request.headers['x-s3center-bridge-token'] !== bridgeToken || request.headers.origin !== origin) {
+        writeBridgeJSON(response, 401, {error: 'Invalid bridge token.'});
+        return;
+      }
+      const event = await readBridgeJSON(request);
+      if (event.webdriver === true) {
+        const error = new Error('Automated browser detected. Connector requires an unmodified native Chrome process.');
+        rejectReady(error);
+        writeBridgeJSON(response, 400, {error: error.message});
+        return;
+      }
+      if (!browserReported) {
+        await report('browser_open', exitIP);
+        browserReported = true;
+      }
       ready = true;
       resolveReady();
-      writeBridgeJSON(response, 200, {
-        authorization_url: payload.authorization_url,
-        bridge_origin: origin,
-        bridge_token: bridgeToken,
-        proxy_enabled: Boolean(payload.proxy_url),
-      });
+      writeBridgeJSON(response, 200, {ok: true});
       return;
     }
-    if (request.method === 'POST' && requestURL.pathname === '/event') {
-      if (request.headers.authorization !== `Bearer ${bridgeToken}`) {
+    if (request.method === 'POST' && requestURL.pathname === `/import/${nonce}`) {
+      if (request.headers['x-s3center-bridge-token'] !== bridgeToken || request.headers.origin !== origin) {
         writeBridgeJSON(response, 401, {error: 'Invalid bridge token.'});
         return;
       }
@@ -315,7 +410,7 @@ async function createBridge() {
       if (ready) return Promise.resolve();
       return Promise.race([
         readyPromise,
-        new Promise((_, reject) => setTimeout(() => reject(new Error('The native browser helper extension did not start. Reinstall the latest connector and try again.')), timeout)),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('The isolated Chrome control page did not open. Close the window, reinstall the latest connector, and try again.')), timeout)),
       ]);
     },
     close() {
@@ -341,27 +436,8 @@ async function readBridgeJSON(request) {
 
 async function processBridgeEvent(event) {
   if (!event || typeof event.type !== 'string') throw new Error('Bridge event type is missing.');
-  switch (event.type) {
-    case 'proxy_verified': {
-      const exitIP = String(event.exit_ip || '').trim();
-      if (!net.isIP(exitIP)) throw new Error('Cloudflare did not return a valid browser exit IP.');
-      await report('proxy_verified', exitIP);
-      return;
-    }
-    case 'browser_open':
-      await report('browser_open', String(event.exit_ip || '').trim());
-      return;
-    case 'bootstrap_token':
-      await report('bootstrap_token', String(event.exit_ip || '').trim(), '', event.bootstrap_token, event.account_id);
-      return;
-    case 'error':
-      await report('', '', String(event.error || 'The native browser connector failed.'));
-      return;
-    case 'heartbeat':
-      return;
-    default:
-      throw new Error('Unsupported bridge event.');
-  }
+  if (event.type !== 'bootstrap_token') throw new Error('Unsupported bridge event.');
+  await report('bootstrap_token', String(event.exit_ip || '').trim(), '', event.bootstrap_token, event.account_id);
 }
 
 function writeBridgeJSON(response, status, value) {
@@ -375,22 +451,38 @@ function writeBridgeJSON(response, status, value) {
   response.end(body);
 }
 
-function writeBridgeHTML(response, markup) {
+function writeBridgeHTML(response, markup, scriptNonce) {
   const body = Buffer.from(markup);
   response.writeHead(200, {
     'Cache-Control': 'no-store',
     'Content-Type': 'text/html; charset=utf-8',
     'Content-Length': body.length,
-    'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'",
+    'Content-Security-Policy': `default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${scriptNonce}'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`,
     'X-Content-Type-Options': 'nosniff',
   });
   response.end(body);
 }
 
-function bootstrapPage() {
-  return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>S3 Center 原生 Cloudflare 登录</title><style>
-    :root{color-scheme:dark}*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;background:#07100f;color:#eaf5f0;font:15px/1.65 system-ui,sans-serif}.card{width:min(620px,calc(100% - 36px));padding:38px;border:1px solid #29463e;border-radius:22px;background:#0f1d1b;box-shadow:0 24px 80px #0007}.eyebrow{color:#72e6b4;font:700 12px ui-monospace,monospace;letter-spacing:.17em}h1{margin:14px 0 8px;font-size:clamp(27px,6vw,39px);line-height:1.15}p{color:#b8ccc4}.status{margin-top:24px;padding:14px 16px;border-radius:12px;background:#122a25;color:#8ef0c5}.note{font-size:13px;color:#809a91}
-  </style></head><body><main class="card"><div class="eyebrow">S3 CENTER · NATIVE BROWSER</div><h1>正在准备 Cloudflare 安全登录</h1><p>此窗口由原生 Edge / Chrome 打开，没有使用 Playwright、Selenium 或远程调试。独立 Profile 与专属代理正在初始化。</p><p id="bridge-status" class="status">正在载入本机安全助手，随后会自动进入 Cloudflare 官方页面…</p><p class="note">若此页面停留超过 45 秒，请关闭窗口，从管理端重新下载并安装最新版 Connector。</p></main></body></html>`;
+function bootstrapPage({nonce, bridgeToken, scriptNonce, exitIP}) {
+  const config = JSON.stringify({
+    authorizationURL: payload.authorization_url,
+    bridgeToken,
+    exitIP,
+    importURL: `/import/${nonce}`,
+    readyURL: `/ready/${nonce}`,
+  }).replaceAll('<', '\\u003c');
+  return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>S3 Center Cloudflare 隔离接入</title><style>
+    :root{color-scheme:dark}*{box-sizing:border-box}body{margin:0;min-height:100vh;background:radial-gradient(circle at 15% 10%,#183d34 0,transparent 30%),#07100f;color:#eaf5f0;font:15px/1.55 system-ui,sans-serif}.shell{width:min(820px,calc(100% - 36px));margin:38px auto;padding:clamp(24px,5vw,44px);border:1px solid #29463e;border-radius:24px;background:#0f1d1bf2;box-shadow:0 24px 80px #0007}.eyebrow{color:#72e6b4;font:700 12px ui-monospace,monospace;letter-spacing:.17em}h1{margin:12px 0 8px;font-size:clamp(28px,6vw,42px);line-height:1.1}p{color:#b8ccc4}.safe{display:flex;gap:12px;align-items:center;margin:22px 0;padding:14px 16px;border:1px solid #28584a;border-radius:14px;background:#102922;color:#9af5cf}.dot{width:9px;height:9px;border-radius:50%;background:#72e6b4;box-shadow:0 0 18px #72e6b4}.steps{display:grid;gap:16px;margin:26px 0}.step{padding:20px;border:1px solid #243d37;border-radius:16px;background:#0b1715}.step b{display:block;margin-bottom:7px;color:#fff}.open{display:inline-flex;margin-top:10px;padding:11px 16px;border-radius:11px;background:#f18b4c;color:#101311;font-weight:800;text-decoration:none}label{display:block;margin-top:14px;color:#d9e9e2;font-weight:650}input,textarea{width:100%;margin-top:7px;padding:12px 13px;border:1px solid #355249;border-radius:10px;background:#081310;color:#f1faf6;font:14px/1.45 ui-monospace,monospace;outline:none}textarea{min-height:92px;resize:vertical}input:focus,textarea:focus{border-color:#72e6b4;box-shadow:0 0 0 3px #72e6b426}button{margin-top:16px;padding:12px 18px;border:0;border-radius:11px;background:#72e6b4;color:#07100f;font-weight:850;cursor:pointer}button:disabled{opacity:.55;cursor:default}.status{min-height:24px;margin-top:13px;color:#93aaa1}.status.error{color:#ff9f8e}.status.ok{color:#8ef0c5}.note{font-size:13px;color:#809a91}code{color:#ffb17b}
+  </style></head><body><main class="shell"><div class="eyebrow">S3 CENTER · ISOLATED CHROME</div><h1>Cloudflare 安全接入控制台</h1><p>这是全新的 S3 Center 专用 Chrome Profile，不读取本机默认 Chrome/Edge 数据；初始不绑定浏览器账号，并关闭同步、首次导入、扩展和密码保存。</p><div class="safe"><span class="dot"></span><span id="safe-text">正在验证原生浏览器与出口…</span></div><div class="steps"><section class="step"><b>1. 打开 Cloudflare 官方 Token 页面</b><span>请在新标签页完成登录和 Token 创建。完成后保留本控制台标签页。</span><br><a class="open" href="${escapeHTML(payload.authorization_url)}" target="_blank" rel="noopener noreferrer">打开 Cloudflare 官方页面 ↗</a></section><section class="step"><b>2. 把一次性 Token 安全导入 S3 Center</b><span>在 Cloudflare Token 结果页复制只显示一次的 <code>cfat_...</code>，同时复制浏览器地址栏中的 Account 页面地址；控制台会自动从地址中识别 Account ID。</span><form id="import-form" autocomplete="off"><label>Cloudflare Account 页面地址或 32 位 Account ID<input id="account-reference" inputmode="url" spellcheck="false" placeholder="https://dash.cloudflare.com/&lt;account-id&gt;/api-tokens/..." required></label><label>一次性引导 API Token<textarea id="bootstrap-token" spellcheck="false" placeholder="cfat_..." required></textarea></label><button id="submit" type="submit" disabled>安全导入并发现 R2 Bucket</button><div id="status" class="status" role="status" aria-live="polite"></div></form></section></div><p class="note">Token 仅通过随机的 <code>127.0.0.1</code> 本机桥接提交到当前短期会话，不写入浏览器磁盘、数据库或日志。成功后可关闭本窗口并返回管理端选择 Bucket。</p></main><script nonce="${scriptNonce}">
+    const config=${config};const form=document.getElementById('import-form');const account=document.getElementById('account-reference');const token=document.getElementById('bootstrap-token');const submit=document.getElementById('submit');const status=document.getElementById('status');const safeText=document.getElementById('safe-text');
+    function accountID(value){const clean=value.trim().toLowerCase();if(/^[a-f0-9]{32}$/.test(clean))return clean;try{const parsed=new URL(clean);if(parsed.hostname!=='dash.cloudflare.com')return '';return parsed.pathname.split('/').find(part=>/^[a-f0-9]{32}$/.test(part))||''}catch{return ''}}
+    form.addEventListener('submit',async event=>{event.preventDefault();status.className='status';const id=accountID(account.value);if(!id){status.textContent='无法识别 Account ID，请复制当前 Cloudflare 页面完整地址。';status.classList.add('error');return}submit.disabled=true;status.textContent='正在通过绑定代理验证 Token 并发现 Bucket…';try{const response=await fetch(config.importURL,{method:'POST',headers:{'Content-Type':'application/json','X-S3Center-Bridge-Token':config.bridgeToken},body:JSON.stringify({type:'bootstrap_token',account_id:id,bootstrap_token:token.value.trim(),exit_ip:config.exitIP})});const body=await response.json().catch(()=>({}));if(!response.ok)throw new Error(body.error||('HTTP '+response.status));token.value='';status.textContent='导入成功。请返回 S3 Center 管理端选择 Bucket。';status.classList.add('ok')}catch(error){status.textContent=error.message||String(error);status.classList.add('error');submit.disabled=false}});
+    async function announce(){try{const response=await fetch(config.readyURL,{method:'POST',headers:{'Content-Type':'application/json','X-S3Center-Bridge-Token':config.bridgeToken},body:JSON.stringify({webdriver:navigator.webdriver===true})});const body=await response.json().catch(()=>({}));if(!response.ok)throw new Error(body.error||('HTTP '+response.status));safeText.textContent='原生 Chrome 与独立 Profile 已就绪 · 出口 IP '+config.exitIP;submit.disabled=false}catch(error){safeText.textContent=error.message||String(error);safeText.parentElement.style.borderColor='#7c3d35';safeText.parentElement.style.color='#ff9f8e'}}announce();
+  </script></body></html>`;
+}
+
+function escapeHTML(value) {
+  return String(value).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&#39;');
 }
 
 async function report(status, exitIP = '', error = '', bootstrapToken = '', accountID = '') {

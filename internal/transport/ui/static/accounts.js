@@ -117,7 +117,7 @@
     oauthLaunchButton.addEventListener('click', function () {
       if (!connectorURL) return;
       window.location.href = connectorURL;
-      setStatus(oauthStatus, 'checking', '已请求启动 Connector 2.0，等待原生浏览器出口验证…');
+      setStatus(oauthStatus, 'checking', '已请求启动 Connector 2.1，等待专用 Chrome 出口验证…');
       schedulePoll(700);
     });
   }
@@ -231,7 +231,7 @@
       setStatus(oauthStatus, 'error', session.error || '授权失败，请重试。');
       return;
     }
-    if (session.status === 'waiting_authorization') setStatus(oauthStatus, 'checking', session.error || '原生隔离浏览器出口验证成功，请正常完成 Cloudflare 登录，在官方页面创建临时引导 Token，并用右下角面板安全导入。');
+    if (session.status === 'waiting_authorization') setStatus(oauthStatus, 'checking', session.error || '专用 Chrome 出口验证成功。请在 Cloudflare 官方页创建临时引导 Token，再将 Token 与 Account 页面地址粘贴回本机控制页。');
     if (session.status === 'discovering') setStatus(oauthStatus, 'checking', '正在经同一代理验证引导 Token，并读取账号与 R2 Bucket…');
     if (session.status === 'authorized') {
       discoveredAccounts = session.accounts || [];

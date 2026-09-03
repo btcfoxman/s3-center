@@ -8,11 +8,7 @@ $RequiredFiles = @(
     'package.json',
     'package-lock.json',
     'uninstall.ps1',
-    'README.md',
-    'extension\manifest.json',
-    'extension\background.js',
-    'extension\bootstrap.js',
-    'extension\panel.js'
+    'README.md'
 )
 
 if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
@@ -24,6 +20,15 @@ if (-not (Get-Command npm.cmd -ErrorAction SilentlyContinue)) {
 $NodeMajor = [int]((& node --version).TrimStart('v').Split('.')[0])
 if ($NodeMajor -lt 20) {
     throw 'Node.js 20 or newer is required.'
+}
+
+$ChromeCandidates = @()
+foreach ($Root in @($env:PROGRAMFILES, ${env:PROGRAMFILES(X86)}, $env:LOCALAPPDATA)) {
+    if ($Root) { $ChromeCandidates += (Join-Path $Root 'Google\Chrome\Application\chrome.exe') }
+}
+$ChromePath = $ChromeCandidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+if (-not $ChromePath) {
+    throw 'Google Chrome is required. Connector 2.1 intentionally does not use Edge because Windows implicit sign-in can attach the local Microsoft account to a new Edge profile.'
 }
 
 New-Item -ItemType Directory -Force -Path $InstallRoot | Out-Null
@@ -40,6 +45,14 @@ foreach ($File in $RequiredFiles) {
     }
 }
 
+# Connector 2.1 uses a loopback control page because current stable Chrome no
+# longer accepts command-line installation of unpacked extensions. This folder
+# contains only obsolete Connector code; browser profiles live elsewhere.
+$ObsoleteExtensionRoot = Join-Path $InstallRoot 'extension'
+if (Test-Path -LiteralPath $ObsoleteExtensionRoot) {
+    Remove-Item -LiteralPath $ObsoleteExtensionRoot -Recurse -Force
+}
+
 Push-Location $InstallRoot
 try {
     # npm ci also removes the obsolete Playwright 1.x dependency while keeping
@@ -54,14 +67,14 @@ New-Item -Path $ProtocolRoot -Force | Out-Null
 Set-ItemProperty -Path $ProtocolRoot -Name '(Default)' -Value 'URL:S3 Center Cloudflare Connector'
 Set-ItemProperty -Path $ProtocolRoot -Name 'URL Protocol' -Value ''
 New-Item -Path "$ProtocolRoot\DefaultIcon" -Force | Out-Null
-Set-ItemProperty -Path "$ProtocolRoot\DefaultIcon" -Name '(Default)' -Value 'msedge.exe,0'
+Set-ItemProperty -Path "$ProtocolRoot\DefaultIcon" -Name '(Default)' -Value ('"{0}",0' -f $ChromePath)
 New-Item -Path "$ProtocolRoot\shell\open\command" -Force | Out-Null
 $Launcher = Join-Path $InstallRoot 'launcher.cmd'
 Set-ItemProperty -Path "$ProtocolRoot\shell\open\command" -Name '(Default)' -Value ('"{0}" "%1"' -f $Launcher)
 
 Write-Host ''
-Write-Host 'S3 Center Connector 2.0 installed for the current Windows user.' -ForegroundColor Green
-Write-Host 'Cloudflare login now uses a native Edge/Chrome process (no Playwright or remote debugging).' -ForegroundColor Green
+Write-Host 'S3 Center Connector 2.1 installed for the current Windows user.' -ForegroundColor Green
+Write-Host 'Cloudflare login now uses a fresh unsigned native Chrome profile with sync, import, extensions, and password storage disabled.' -ForegroundColor Green
 Write-Host "Protocol: s3center://"
-Write-Host "Profiles: $(Join-Path $env:LOCALAPPDATA 'S3Center\Profiles')"
+Write-Host "Profiles: $(Join-Path $env:LOCALAPPDATA 'S3Center\Profiles')\<profile-id>\browser-chrome-v1"
 Write-Host 'Return to S3 Center and click Open isolated Cloudflare login.'

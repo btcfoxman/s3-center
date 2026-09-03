@@ -103,10 +103,12 @@ func TestCloudflareConnectorArchiveIsComplete(t *testing.T) {
 		if strings.Contains(file.Name, "node_modules") {
 			t.Fatalf("archive contains installed dependencies: %s", file.Name)
 		}
+		if strings.Contains(file.Name, "/extension/") {
+			t.Fatalf("archive contains the obsolete browser extension: %s", file.Name)
+		}
 	}
 	for _, name := range []string{
 		"connector.mjs", "launcher.cmd", "install.ps1", "uninstall.ps1", "package.json", "package-lock.json", "README.md",
-		"extension/manifest.json", "extension/background.js", "extension/bootstrap.js", "extension/panel.js",
 	} {
 		fullName := "s3-center-cloudflare-connector/" + name
 		if !files[fullName] {
@@ -119,6 +121,14 @@ func TestCloudflareConnectorArchiveIsComplete(t *testing.T) {
 	}
 	if bytes.Contains(connectorSource, []byte("playwright")) || bytes.Contains(connectorSource, []byte("remote-debugging")) {
 		t.Fatal("connector launcher must not automate or remotely debug the Cloudflare login browser")
+	}
+	for _, required := range [][]byte{[]byte("browser-chrome-v1"), []byte("--disable-sync"), []byte("navigator.webdriver===true"), []byte("Cloudflare 安全接入控制台")} {
+		if !bytes.Contains(connectorSource, required) {
+			t.Fatalf("connector launcher is missing the strong-isolation control %q", required)
+		}
+	}
+	if bytes.Contains(connectorSource, []byte("'Microsoft', 'Edge'")) {
+		t.Fatal("connector must not silently fall back to Edge because Windows implicit sign-in can attach the local account")
 	}
 }
 

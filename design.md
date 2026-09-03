@@ -276,7 +276,7 @@ OAuth 是控制面凭证，不一定直接适合作为 S3 数据面凭证。
 
 ## 方案二：隔离浏览器 + 一次性引导 Token（当前实现）
 
-Connector 为每个 Cloudflare 身份固定绑定本机独立 Profile 和可选代理，并使用不带 Playwright/WebDriver/远程调试的原生 Edge/Chrome 打开 Cloudflare 官方预填 Account API Token 页面。随包的本机扩展负责代理认证与 Token 导入，但在登录验证阶段不修改 Cloudflare 页面。管理员只需登录、确认并把一次性 Token 粘贴到选定 Account 后出现的安全导入面板。服务端随后经同一代理完成：
+Connector 为每个 Cloudflare 身份固定绑定全新的 S3 Center 专用 Chrome Profile 和可选代理，并使用不带 Playwright/WebDriver/远程调试的原生 Chrome 打开 Cloudflare 官方预填 Account API Token 页面。Connector 不调用本机默认 Profile，不回退 Edge；新 Profile 初始不绑定浏览器账号，并关闭同步、首次启动资料导入、扩展和密码保存，避免 Windows 隐式登录把本地身份串入隔离环境。Connector 在随机 `127.0.0.1` 地址提供本机控制页，负责验证绑定代理出口并接收管理员从 Cloudflare 官方页复制的一次性 Token 与 Account 页面地址；Cloudflare 登录页本身不被观察或修改。服务端随后经同一代理完成：
 
 ```text
 验证引导 Token
@@ -287,6 +287,8 @@ Connector 为每个 Cloudflare 身份固定绑定本机独立 Profile 和可选�
 ```
 
 引导 Token 只驻留短期内存，不进入数据库和日志；登录 Cookie 只在本机 Profile。若创建后端失败，刚生成的 Bucket Token 会被撤销，引导 Token 在会话内保留以便重试。
+
+创建 Bucket Token 的请求不得携带 `policies[].id`；该 ID 由 Cloudflare 在创建成功后生成。请求只发送 `effect`、权限组 ID 和目标 Bucket resource，避免被 API 判定为复用已有策略。
 
 ## 方案三：单独接入 R2 Bucket Token
 
