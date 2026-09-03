@@ -97,6 +97,17 @@ func TestCloudflareConnectorArchiveIsComplete(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	assertCloudflareConnectorArchiveFiles(t, reader)
+
+	connectorSource, err := embeddedFS.ReadFile("connector/connector.mjs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertCloudflareConnectorSource(t, connectorSource)
+}
+
+func assertCloudflareConnectorArchiveFiles(t *testing.T, reader *zip.Reader) {
+	t.Helper()
 	files := make(map[string]bool, len(reader.File))
 	for _, file := range reader.File {
 		files[file.Name] = true
@@ -115,10 +126,10 @@ func TestCloudflareConnectorArchiveIsComplete(t *testing.T) {
 			t.Errorf("archive missing %s", fullName)
 		}
 	}
-	connectorSource, err := embeddedFS.ReadFile("connector/connector.mjs")
-	if err != nil {
-		t.Fatal(err)
-	}
+}
+
+func assertCloudflareConnectorSource(t *testing.T, connectorSource []byte) {
+	t.Helper()
 	if bytes.Contains(connectorSource, []byte("playwright")) || bytes.Contains(connectorSource, []byte("remote-debugging")) {
 		t.Fatal("connector launcher must not automate or remotely debug the Cloudflare login browser")
 	}
