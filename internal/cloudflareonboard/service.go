@@ -467,6 +467,8 @@ func (s *Service) Status(id string) (SessionView, error) {
 }
 
 // Complete mints one bucket-scoped account token and hot-adds the R2 backend.
+//
+//nolint:gocognit // Provision, compensate, and revoke transitions stay together as one auditable transaction.
 func (s *Service) Complete(ctx context.Context, request CompleteRequest) (backendmanage.View, error) {
 	if !s.Enabled() {
 		return backendmanage.View{}, errors.New("cloudflare browser onboarding is disabled")
