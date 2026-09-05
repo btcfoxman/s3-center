@@ -7,6 +7,29 @@ tunnel.
 Copy `.env.example` to `.env` on the server and replace every value. Image
 selection is intentionally not stored in `.env`; the workflow passes
 `IMAGE_REGISTRY`, `IMAGE_NAMESPACE`, `IMAGE_NAME`, and `IMAGE_TAG` to Compose.
+After a successful deployment it also writes those non-secret values to the
+separate `.image.env` operator file and installs `s3-centerctl`. The application
+secret file `.env` is never overwritten by the control script.
+
+Manual service control on the server does not contact GHCR and does not require
+a registry login:
+
+```bash
+cd /path/to/s3-center
+./s3-centerctl stop       # stop the public app/tunnel; keep PostgreSQL running
+./s3-centerctl start      # start the existing app/tunnel and wait for readiness
+./s3-centerctl restart    # restart only the app and wait for readiness
+./s3-centerctl recreate   # recreate the app from the cached deployed image
+./s3-centerctl status
+./s3-centerctl health
+./s3-centerctl logs       # Ctrl-C exits log following
+```
+
+Use `stop-all` and `start-all` only when PostgreSQL must also be stopped. These
+commands preserve containers, the PostgreSQL volume, configuration, and all
+dynamic backend records. Image updates remain the responsibility of the
+`Production Docker` workflow; the manual commands deliberately never pull an
+uncached image.
 
 Operator guides:
 

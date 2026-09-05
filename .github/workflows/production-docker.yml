@@ -28,6 +28,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
+      - name: Validate production control script
+        run: |
+          bash -n deploy/production/s3-centerctl
+          deploy/production/s3-centerctl --help >/dev/null
+
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
@@ -91,6 +96,7 @@ jobs:
             deploy/production/INDEX-MODE-API.md \
             deploy/production/index-mode-openapi.yaml \
             deploy/production/R2-ACCOUNT-MANAGEMENT.md \
+            deploy/production/s3-centerctl \
             "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/"
 
       - name: Ensure managed-backend encryption key
@@ -145,6 +151,27 @@ jobs:
              IMAGE_REGISTRY='$IMAGE_REGISTRY' IMAGE_NAMESPACE='$IMAGE_NAMESPACE' IMAGE_NAME='$IMAGE_NAME' IMAGE_TAG='$IMAGE_TAG' docker compose up -d && \
              for i in \$(seq 1 30); do curl -fsS http://127.0.0.1:48080/health/ready && exit 0; sleep 2; done; \
              docker compose ps; docker compose logs --tail=120 '$DEPLOY_SERVICE'; exit 1"
+
+      - name: Install manual service controls
+        shell: bash
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+        run: |
+          set -euo pipefail
+          image_environment="$(printf '%s\n' \
+            "IMAGE_REGISTRY=$IMAGE_REGISTRY" \
+            "IMAGE_NAMESPACE=$IMAGE_NAMESPACE" \
+            "IMAGE_NAME=$IMAGE_NAME" \
+            "IMAGE_TAG=$IMAGE_TAG" | base64 -w0)"
+          ssh -i ~/.ssh/deploy_key -p "${DEPLOY_PORT:-22}" "$DEPLOY_USER@$DEPLOY_HOST" \
+            "set -eu; cd '$DEPLOY_PATH'; umask 077; \
+             tmp=\$(mktemp .image.env.XXXXXX); \
+             printf '%s' '$image_environment' | base64 -d > \"\$tmp\"; \
+             chmod 600 \"\$tmp\"; mv \"\$tmp\" .image.env; \
+             chmod 755 s3-centerctl; ./s3-centerctl image; ./s3-centerctl status"
 
       - name: Configure Cloudflare Tunnel routes
         shell: bash

@@ -1,0 +1,161 @@
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+readonly SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+readonly IMAGE_ENV_FILE="${S3_CENTER_IMAGE_ENV_FILE:-$SCRIPT_DIR/.image.env}"
+readonly APP_SERVICE="${S3_CENTER_APP_SERVICE:-app}"
+readonly TUNNEL_SERVICE="${S3_CENTER_TUNNEL_SERVICE:-cloudflared}"
+readonly HEALTH_URL="${S3_CENTER_HEALTH_URL:-http://127.0.0.1:48080/health/ready}"
+
+cd "$SCRIPT_DIR"
+
+die() {
+  printf 's3-centerctl: %s\n' "$*" >&2
+  exit 1
+}
+
+usage() {
+  cat <<'EOF'
+Usage: ./s3-centerctl <command> [service ...]
+
+Commands:
+  start       Start the application and Cloudflare tunnel from existing containers.
+  stop        Stop the tunnel and application; PostgreSQL remains running.
+  restart     Restart the application without pulling an image.
+  recreate    Recreate the application from the locally cached deployed image.
+  start-all   Start PostgreSQL, the application, and the tunnel.
+  stop-all    Stop the complete stack without deleting containers or data.
+  status      Show all Compose container states.
+  health      Check the application readiness endpoint on 127.0.0.1:48080.
+  logs        Follow the last 200 log lines; defaults to the application service.
+  image       Show the exact image selected by the last successful deployment.
+  help        Show this help.
+
+The start, stop, restart, and recreate commands never pull from GHCR. Use the
+GitHub Actions production workflow when the selected image is not cached.
+EOF
+}
+
+load_image_environment() {
+  [[ -f "$IMAGE_ENV_FILE" ]] || die "missing $IMAGE_ENV_FILE; run the production deployment once"
+
+  local line key value
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="${line%$'\r'}"
+    [[ -z "$line" || "$line" == \#* ]] && continue
+    [[ "$line" == *=* ]] || die "invalid line in $IMAGE_ENV_FILE"
+    key="${line%%=*}"
+    value="${line#*=}"
+    case "$key" in
+      IMAGE_REGISTRY|IMAGE_NAMESPACE|IMAGE_NAME|IMAGE_TAG)
+        [[ "$value" =~ ^[A-Za-z0-9][A-Za-z0-9._/:@-]*$ ]] || die "invalid value for $key in $IMAGE_ENV_FILE"
+        printf -v "$key" '%s' "$value"
+        export "$key"
+        ;;
+      *) die "unexpected key $key in $IMAGE_ENV_FILE" ;;
+    esac
+  done < "$IMAGE_ENV_FILE"
+
+  local required
+  for required in IMAGE_REGISTRY IMAGE_NAMESPACE IMAGE_NAME IMAGE_TAG; do
+    [[ -n "${!required:-}" ]] || die "$required is missing from $IMAGE_ENV_FILE"
+  done
+}
+
+compose() {
+  docker compose "$@"
+}
+
+image_reference() {
+  printf '%s/%s/%s:%s' "$IMAGE_REGISTRY" "$IMAGE_NAMESPACE" "$IMAGE_NAME" "$IMAGE_TAG"
+}
+
+require_cached_image() {
+  local reference
+  reference="$(image_reference)"
+  docker image inspect "$reference" >/dev/null 2>&1 ||
+    die "image $reference is not cached; run the Production Docker workflow before recreating"
+}
+
+wait_until_ready() {
+  local attempt
+  for attempt in $(seq 1 30); do
+    if curl -fsS "$HEALTH_URL"; then
+      printf '\nS3 Center is ready.\n'
+      return 0
+    fi
+    sleep 2
+  done
+  compose ps --all >&2 || true
+  compose logs --tail=120 "$APP_SERVICE" >&2 || true
+  die "readiness check failed: $HEALTH_URL"
+}
+
+command="${1:-help}"
+shift || true
+
+if [[ "$command" == "help" || "$command" == "-h" || "$command" == "--help" ]]; then
+  usage
+  exit 0
+fi
+
+load_image_environment
+command -v docker >/dev/null 2>&1 || die "docker is not installed"
+docker compose version >/dev/null 2>&1 || die "docker compose v2 is not available"
+
+case "$command" in
+  start)
+    compose start "$APP_SERVICE"
+    wait_until_ready
+    compose start "$TUNNEL_SERVICE"
+    ;;
+  stop)
+    compose stop "$TUNNEL_SERVICE" "$APP_SERVICE"
+    ;;
+  restart)
+    compose restart "$APP_SERVICE"
+    wait_until_ready
+    ;;
+  recreate)
+    require_cached_image
+    compose up -d --no-deps --force-recreate "$APP_SERVICE"
+    wait_until_ready
+    ;;
+  start-all)
+    compose start postgres
+    compose start "$APP_SERVICE"
+    wait_until_ready
+    compose start "$TUNNEL_SERVICE"
+    ;;
+  stop-all)
+    compose stop
+    ;;
+  status)
+    compose ps --all
+    ;;
+  health)
+    curl -fsS "$HEALTH_URL"
+    printf '\n'
+    ;;
+  logs)
+    if (($# == 0)); then
+      set -- "$APP_SERVICE"
+    fi
+    compose logs --tail=200 --follow "$@"
+    ;;
+  image)
+    reference="$(image_reference)"
+    printf '%s\n' "$reference"
+    if docker image inspect "$reference" >/dev/null 2>&1; then
+      printf 'cached: yes\n'
+    else
+      printf 'cached: no\n'
+      exit 1
+    fi
+    ;;
+  *)
+    usage >&2
+    die "unknown command: $command"
+    ;;
+esac

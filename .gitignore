@@ -20,6 +20,7 @@ web/content/godoc/
 tags
 tmp-server.txt
 deploy/production/.env
+deploy/production/.image.env
 deploy/production/cloudflared/
 output/playwright/
 .playwright-cli/
