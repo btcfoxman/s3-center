@@ -92,7 +92,7 @@
     </div>
     <div class="cf-account-grid">
       {{range .CloudflareAccounts}}
-      <article class="cf-account-card state-{{.State}}">
+      <article class="cf-account-card state-{{.State}}{{if .Paused}} is-write-paused{{end}}">
         <div class="cf-account-head">
           <div>
             <span class="cf-provider">CF / R2</span>
@@ -100,9 +100,12 @@
             <code>{{.AccountIDShort}}</code>
           </div>
           <span class="cf-state">
-            {{if eq .State "critical"}}已超免费线{{else if eq .State "warning"}}额度预警{{else}}水位正常{{end}}
+            {{if .Paused}}已暂停写入{{else if eq .State "critical"}}已超免费线{{else if eq .State "warning"}}额度预警{{else}}水位正常{{end}}
           </span>
         </div>
+        {{if .Paused}}
+        <div class="cf-placement-hold"><b>PLACEMENT HOLD</b><span>新对象不再分配到此账号；读取、临时链接与删除保持可用</span></div>
+        {{end}}
         <div class="cf-capacity-readout">
           <strong>{{formatBytes .UsedBytes}}</strong>
           <span>/ {{formatBytes .FreeTierBytes}} FREE</span>
@@ -125,6 +128,9 @@
         </div>
         <div class="cf-account-controls">
           <a class="cf-card-action" href="#object-browser">管理存储内容</a>
+          {{if .PauseEditable}}
+          <button type="button" class="cf-card-action cf-account-state{{if .Paused}} is-resume{{else}} is-pause{{end}}" data-account-id="{{.AccountID}}" data-account-label="{{.Label}}" data-paused="{{.Paused}}">{{if .Paused}}恢复写入{{else}}暂停写入{{end}}</button>
+          {{end}}
           {{if and $.CloudflareOAuthEnabled .Managed}}
           <button type="button" class="cf-card-action cf-oauth-reauthorize" data-account-id="{{.AccountID}}" data-account-label="{{.Label}}">登录 / 添加 Bucket</button>
           {{end}}
@@ -506,6 +512,29 @@
     <div class="dialog-actions">
       <button id="proxy-cancel" type="button">取消</button>
       <button id="proxy-submit" type="submit" class="btn-primary">验证并应用</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="account-state-dialog" class="proxy-dialog account-state-dialog">
+  <form id="account-state-form" autocomplete="off">
+    <div class="dialog-heading">
+      <span id="account-state-kicker" class="section-index">PLACEMENT CONTROL</span>
+      <h2 id="account-state-title">暂停账号写入</h2>
+      <p id="account-state-description">暂停后，该 Cloudflare 账号下的全部 Bucket 将立即退出新对象调度。</p>
+    </div>
+    <input id="account-state-id" name="account_id" type="hidden">
+    <input id="account-state-paused" name="paused" type="hidden">
+    <div class="account-state-target"><span>Cloudflare 账号</span><strong id="account-state-label"></strong></div>
+    <div class="account-state-impact">
+      <div><b>停止</b><span>新建直传、S3 写入与自动副本目标</span></div>
+      <div><b>保留</b><span>已有对象读取、签名、列举和上游删除</span></div>
+      <div><b>注意</b><span>已签发的 R2 临时 URL 会持续到原过期时间，无法提前撤销</span></div>
+    </div>
+    <p id="account-state-status" class="account-add-status" role="status"></p>
+    <div class="dialog-actions">
+      <button id="account-state-cancel" type="button">取消</button>
+      <button id="account-state-submit" type="submit" class="btn-danger">确认暂停</button>
     </div>
   </form>
 </dialog>

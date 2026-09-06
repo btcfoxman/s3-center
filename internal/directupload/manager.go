@@ -40,11 +40,13 @@ type Fleet interface {
 	GetBackend(name string) (backend.ObjectBackend, error)
 	BackendOrder() []string
 	MaxObjectSize(name string) int64
+	IsBackendWritePaused(name string) bool
 }
 
 type staticFleet struct {
-	backends map[string]backend.ObjectBackend
-	order    []string
+	backends    map[string]backend.ObjectBackend
+	order       []string
+	writePaused map[string]bool
 }
 
 func (f staticFleet) GetBackend(name string) (backend.ObjectBackend, error) {
@@ -54,8 +56,9 @@ func (f staticFleet) GetBackend(name string) (backend.ObjectBackend, error) {
 	}
 	return be, nil
 }
-func (f staticFleet) BackendOrder() []string     { return append([]string(nil), f.order...) }
-func (f staticFleet) MaxObjectSize(string) int64 { return 0 }
+func (f staticFleet) BackendOrder() []string                { return append([]string(nil), f.order...) }
+func (f staticFleet) MaxObjectSize(string) int64            { return 0 }
+func (f staticFleet) IsBackendWritePaused(name string) bool { return f.writePaused[name] }
 
 //nolint:gocritic // The manager owns an immutable configuration snapshot.
 func New(cfg config.DirectUploadConfig, store core.MetadataStore, backends map[string]backend.ObjectBackend, order []string, buckets []config.BucketConfig) (*Manager, error) {
@@ -146,6 +149,9 @@ func (m *Manager) reserve(ctx context.Context, r *CreateRequest, maxSize int64) 
 	physical := physicalObjectKey(id, r.Key)
 	candidates := make([]string, 0, len(m.fleet.BackendOrder()))
 	for _, name := range m.fleet.BackendOrder() {
+		if m.fleet.IsBackendWritePaused(name) {
+			continue
+		}
 		if limit := m.fleet.MaxObjectSize(name); limit == 0 || r.Size <= limit {
 			candidates = append(candidates, name)
 		}

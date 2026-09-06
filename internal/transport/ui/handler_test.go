@@ -644,6 +644,9 @@ func TestDashboard_Returns200HTML(t *testing.T) {
 	if !strings.Contains(string(body), `id="proxy-dialog"`) {
 		t.Error("response body missing account proxy dialog")
 	}
+	if !strings.Contains(string(body), `id="account-state-dialog"`) {
+		t.Error("response body missing account pause/resume dialog")
+	}
 	if !strings.Contains(string(body), `id="object-browser"`) || !strings.Contains(string(body), `id="confirm-delete-phrase"`) {
 		t.Error("response body missing upstream object deletion controls")
 	}

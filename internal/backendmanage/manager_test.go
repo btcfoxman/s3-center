@@ -356,6 +356,138 @@ func TestUpdateAccountProxyPersistenceFailureRollsBackEarlierBuckets(t *testing.
 	}
 }
 
+//nolint:gocognit // One end-to-end path verifies persistence, live exclusion, and restoration together.
+func TestSetAccountPausedPersistsAndHotAppliesEveryBucket(t *testing.T) {
+	t.Parallel()
+	const accountID = "cccccccccccccccccccccccccccccccc"
+	definitions := []Definition{
+		managedTestDefinition(t, "r2-a", accountID, "bucket-a", ""),
+		managedTestDefinition(t, "r2-b", accountID, "bucket-b", ""),
+	}
+	definitions[0].Managed = false
+	runtime := proxyTestRuntime([]string{"r2-a", "r2-b"}, map[string]backend.ObjectBackend{
+		"r2-a": &proxyTestBackend{}, "r2-b": &proxyTestBackend{},
+	})
+	store := &proxyTestStore{payloads: make(map[string][]byte)}
+	manager, err := New(ManagerDeps{
+		Config: managedTestConfig(), Store: store, Runtime: runtime, Definitions: definitions,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	views, err := manager.SetAccountPaused(context.Background(), &SetAccountPausedRequest{
+		AccountID: accountID, Paused: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(views) != 2 || store.writes != 2 {
+		t.Fatalf("views/writes = %d/%d, want 2/2", len(views), store.writes)
+	}
+	for _, view := range views {
+		if !view.Paused || !view.Managed || !runtime.IsBackendWritePaused(view.Name) {
+			t.Fatalf("pause was not fully applied for %s: %+v", view.Name, view)
+		}
+		stored, openErr := manager.cipher.open(view.Name, store.payloads[view.Name])
+		if openErr != nil {
+			t.Fatal(openErr)
+		}
+		if !stored.Paused || !stored.Managed {
+			t.Fatalf("stored state for %s = %+v", view.Name, stored)
+		}
+	}
+	if eligible := runtime.EligibleForWrite(1, 0, 1); len(eligible) != 0 {
+		t.Fatalf("eligible while account paused = %v", eligible)
+	}
+
+	views, err = manager.SetAccountPaused(context.Background(), &SetAccountPausedRequest{
+		AccountID: accountID, Paused: false,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, view := range views {
+		if view.Paused || runtime.IsBackendWritePaused(view.Name) {
+			t.Fatalf("resume was not fully applied for %s: %+v", view.Name, view)
+		}
+	}
+	if eligible := runtime.EligibleForWrite(1, 0, 1); len(eligible) != 2 {
+		t.Fatalf("eligible after resume = %v, want both backends", eligible)
+	}
+}
+
+func TestSetAccountPausedPersistenceFailureLeavesRuntimeUntouched(t *testing.T) {
+	t.Parallel()
+	const accountID = "dddddddddddddddddddddddddddddddd"
+	definitions := []Definition{
+		managedTestDefinition(t, "r2-a", accountID, "bucket-a", ""),
+		managedTestDefinition(t, "r2-b", accountID, "bucket-b", ""),
+	}
+	definitions[0].Managed = false
+	runtime := proxyTestRuntime([]string{"r2-a", "r2-b"}, map[string]backend.ObjectBackend{
+		"r2-a": &proxyTestBackend{}, "r2-b": &proxyTestBackend{},
+	})
+	store := &proxyTestStore{payloads: make(map[string][]byte), failAt: 2}
+	manager, err := New(ManagerDeps{
+		Config: managedTestConfig(), Store: store, Runtime: runtime, Definitions: definitions,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := manager.SetAccountPaused(context.Background(), &SetAccountPausedRequest{
+		AccountID: accountID, Paused: true,
+	}); err == nil {
+		t.Fatal("expected persistence failure")
+	}
+	if runtime.IsBackendWritePaused("r2-a") || runtime.IsBackendWritePaused("r2-b") {
+		t.Fatal("runtime changed after persistence failure")
+	}
+	for _, view := range manager.List() {
+		if view.Paused {
+			t.Fatalf("manager view changed after persistence failure: %+v", view)
+		}
+	}
+	if _, exists := store.payloads["r2-a"]; exists {
+		t.Fatal("adopted static definition was not removed during rollback")
+	}
+}
+
+func TestCreateInheritsExistingAccountPause(t *testing.T) {
+	t.Parallel()
+	const accountID = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+	existing := managedTestDefinition(t, "r2-existing", accountID, "bucket-old", "")
+	existing.Paused = true
+	runtime := proxyTestRuntime([]string{"r2-existing"}, map[string]backend.ObjectBackend{
+		"r2-existing": &proxyTestBackend{},
+	})
+	if err := runtime.SetBackendWritePaused("r2-existing", true); err != nil {
+		t.Fatal(err)
+	}
+	store := &proxyTestStore{payloads: make(map[string][]byte)}
+	manager, err := New(ManagerDeps{
+		Config: managedTestConfig(), Store: store, Runtime: runtime, Definitions: []Definition{existing},
+		BackendFactory: func(context.Context, *config.BackendConfig) (BucketBackend, error) {
+			return &proxyTestBackend{}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	view, err := manager.Create(context.Background(), &CreateRequest{
+		Name: "r2-new", AccountID: accountID, Bucket: "bucket-new",
+		AccessKeyID: "access", SecretAccessKey: "secret",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !view.Paused || !runtime.IsBackendWritePaused("r2-new") {
+		t.Fatalf("new backend did not inherit account pause: %+v", view)
+	}
+}
+
 func managedTestDefinition(t *testing.T, name, accountID, bucket, proxyURL string) Definition {
 	t.Helper()
 	definition, err := buildDefinition(&CreateRequest{

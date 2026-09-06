@@ -58,6 +58,7 @@ type DrainChecker interface {
 type Config struct {
 	Backends         map[string]backend.ObjectBackend
 	Order            []string
+	PausedBackends   map[string]bool
 	BackendTimeout   time.Duration
 	Usage            *counter.UsageTracker
 	RoutingStrategy  config.RoutingStrategy
@@ -92,7 +93,7 @@ type BackendRuntime struct {
 // collector via the closure over c.RecordOperation.
 func New(cfg *Config) *BackendRuntime {
 	c := &BackendRuntime{
-		registry:         newBackendRegistry(cfg.Backends, cfg.Order),
+		registry:         newBackendRegistry(cfg.Backends, cfg.Order, cfg.PausedBackends),
 		usage:            newUsagePolicy(cfg.Usage, cfg.MaxObjectSizes),
 		timeouts:         newTimeoutPolicy(cfg.BackendTimeout),
 		classifier:       newErrorClassifier(),
@@ -176,8 +177,8 @@ func (c *BackendRuntime) BackendOrder() []string {
 
 // AddBackend admits one already-validated backend into the live fleet and its
 // quota policy without restarting the process.
-func (c *BackendRuntime) AddBackend(name string, be backend.ObjectBackend, maxObjectSize int64, limits core.UsageLimits) error {
-	if err := c.registry.Add(name, be); err != nil {
+func (c *BackendRuntime) AddBackend(name string, be backend.ObjectBackend, maxObjectSize int64, limits core.UsageLimits, paused bool) error {
+	if err := c.registry.Add(name, be, paused); err != nil {
 		return err
 	}
 	c.usage.RegisterBackend(name, maxObjectSize, limits)
@@ -189,6 +190,17 @@ func (c *BackendRuntime) AddBackend(name string, be backend.ObjectBackend, maxOb
 // multi-backend account update can roll back safely.
 func (c *BackendRuntime) ReplaceBackend(name string, be backend.ObjectBackend) (backend.ObjectBackend, error) {
 	return c.registry.Replace(name, be)
+}
+
+// SetBackendWritePaused controls whether a live backend can receive new
+// object placements without removing it from read and maintenance paths.
+func (c *BackendRuntime) SetBackendWritePaused(name string, paused bool) error {
+	return c.registry.SetWritePaused(name, paused)
+}
+
+// IsBackendWritePaused reports the live new-placement state.
+func (c *BackendRuntime) IsBackendWritePaused(name string) bool {
+	return c.registry.IsWritePaused(name)
 }
 
 // IsDraining returns true if the named backend is currently being drained.
@@ -228,7 +240,8 @@ func (c *BackendRuntime) MaxObjectSize(name string) int64 {
 // given operation. Composed pipeline of registry filters + usage
 // filter so each capability owns its half of the decision.
 func (c *BackendRuntime) EligibleForWrite(apiCalls, egress, ingress int64) []string {
-	eligible := c.registry.ExcludeDraining(c.registry.Order())
+	eligible := c.registry.ExcludeWritePaused(c.registry.Order())
+	eligible = c.registry.ExcludeDraining(eligible)
 	eligible = c.registry.ExcludeUnhealthy(eligible)
 	return c.usage.FilterEligible(eligible, apiCalls, egress, ingress)
 }

@@ -93,3 +93,16 @@ func TestCloudflareUsage_DisablesProxyEditingWithoutAccountID(t *testing.T) {
 	require.Len(t, accounts, 1)
 	assert.False(t, accounts[0].ProxyEditable)
 }
+
+func TestCloudflareUsage_AggregatesPausedAccountState(t *testing.T) {
+	t.Parallel()
+	const accountID = "cccccccccccccccccccccccccccccccc"
+	accounts := cloudflareUsage([]backendmanage.View{
+		{Name: "r2-a", Provider: "cloudflare_r2", AccountID: accountID, Paused: true},
+		{Name: "r2-b", Provider: "cloudflare_r2", AccountID: accountID, Paused: true},
+	}, &dashboard.Data{QuotaStats: map[string]core.QuotaStat{}, UsageStats: map[string]core.UsageStat{}})
+
+	require.Len(t, accounts, 1)
+	assert.True(t, accounts[0].Paused)
+	assert.True(t, accounts[0].PauseEditable)
+}

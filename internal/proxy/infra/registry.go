@@ -27,17 +27,24 @@ import (
 // SetDrainChecker once the drain manager exists, since it is built after
 // the runtime.
 type backendRegistry struct {
-	mu       sync.RWMutex
-	backends map[string]backend.ObjectBackend
-	order    []string
-	drainMgr DrainChecker
+	mu          sync.RWMutex
+	backends    map[string]backend.ObjectBackend
+	order       []string
+	writePaused map[string]bool
+	drainMgr    DrainChecker
 }
 
 // newBackendRegistry constructs a registry from the backend map and
 // iteration order. The drain checker is wired post-construction via
 // SetDrainChecker.
-func newBackendRegistry(backends map[string]backend.ObjectBackend, order []string) *backendRegistry {
-	return &backendRegistry{backends: backends, order: order}
+func newBackendRegistry(backends map[string]backend.ObjectBackend, order []string, paused map[string]bool) *backendRegistry {
+	writePaused := make(map[string]bool, len(paused))
+	for name, isPaused := range paused {
+		if isPaused {
+			writePaused[name] = true
+		}
+	}
+	return &backendRegistry{backends: backends, order: order, writePaused: writePaused}
 }
 
 // SetDrainChecker installs the drain manager after BackendRuntime has been
@@ -78,7 +85,7 @@ func (r *backendRegistry) Get(name string) (backend.ObjectBackend, error) {
 }
 
 // Add registers a backend and appends it to the deterministic routing order.
-func (r *backendRegistry) Add(name string, be backend.ObjectBackend) error {
+func (r *backendRegistry) Add(name string, be backend.ObjectBackend, paused bool) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if _, exists := r.backends[name]; exists {
@@ -86,6 +93,9 @@ func (r *backendRegistry) Add(name string, be backend.ObjectBackend) error {
 	}
 	r.backends[name] = be
 	r.order = append(r.order, name)
+	if paused {
+		r.writePaused[name] = true
+	}
 	return nil
 }
 
@@ -102,6 +112,36 @@ func (r *backendRegistry) Replace(name string, be backend.ObjectBackend) (backen
 	}
 	r.backends[name] = be
 	return old, nil
+}
+
+// SetWritePaused atomically controls whether a backend may receive newly
+// allocated objects. The backend remains registered so indexed reads,
+// deletes, and already-issued direct-upload grants keep working.
+func (r *backendRegistry) SetWritePaused(name string, paused bool) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, exists := r.backends[name]; !exists {
+		return fmt.Errorf("backend %s not found", name)
+	}
+	if paused {
+		r.writePaused[name] = true
+	} else {
+		delete(r.writePaused, name)
+	}
+	return nil
+}
+
+// IsWritePaused reports whether new placement is disabled for a backend.
+func (r *backendRegistry) IsWritePaused(name string) bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.writePaused[name]
+}
+
+// ExcludeWritePaused removes backends that an operator paused for new
+// placement while preserving the caller's slice.
+func (r *backendRegistry) ExcludeWritePaused(eligible []string) []string {
+	return slices.DeleteFunc(slices.Clone(eligible), r.IsWritePaused)
 }
 
 // IsDraining returns true if the named backend is currently being

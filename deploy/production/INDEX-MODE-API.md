@@ -386,7 +386,7 @@ with requests.request(request["method"], request["url"],
 | 404 | `object_not_found` / `session_not_found` | 逻辑对象或会话不存在 |
 | 409 | `session_conflict` | 大小不符、状态冲突；查询会话后决定重试或重建 |
 | 410 | `session_expired` | 使用新的 Idempotency-Key 创建上传 |
-| 507 | `insufficient_capacity` | 当前所有 R2/S3 额度组均不可写，稍后重试或联系管理员扩容 |
+| 507 | `insufficient_capacity` | 当前所有 R2/S3 额度组均不可写（包括账号被管理员暂停），稍后重试或联系管理员恢复/扩容 |
 
 - 控制 API 的 5xx、网络断开可以指数退避重试；创建上传必须复用同一个 `Idempotency-Key`。
 - 上游预签名请求失败时，不要把带签名的完整 URL 写入日志；它在过期前等同临时凭据。

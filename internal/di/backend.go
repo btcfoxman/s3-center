@@ -59,6 +59,7 @@ import (
 type BackendsResult struct {
 	Backends       map[string]backend.ObjectBackend
 	Order          []string
+	PausedBackends map[string]bool
 	UsageLimits    map[string]core.UsageLimits
 	MaxObjectSizes map[string]int64
 	// Breakers is the per-backend circuit breakers produced when
@@ -142,6 +143,7 @@ func initializeBackendFleet(cfg *config.Config, definitions []backendmanage.Defi
 	order := make([]string, 0, len(definitions))
 	limits := make(map[string]core.UsageLimits, len(definitions))
 	maxSizes := make(map[string]int64, len(definitions))
+	paused := make(map[string]bool, len(definitions))
 	breakers := make([]breaker.StaleProbeResetter, 0, len(definitions))
 
 	for idx := range definitions {
@@ -165,6 +167,9 @@ func initializeBackendFleet(cfg *config.Config, definitions []backendmanage.Defi
 		}
 		backends[bcfg.Name] = be
 		order = append(order, bcfg.Name)
+		if definitions[idx].Paused {
+			paused[bcfg.Name] = true
+		}
 		limits[bcfg.Name] = core.UsageLimits{
 			APIRequestLimit:  bcfg.APIRequestLimit,
 			EgressByteLimit:  bcfg.EgressByteLimit,
@@ -185,6 +190,7 @@ func initializeBackendFleet(cfg *config.Config, definitions []backendmanage.Defi
 	return &BackendsResult{
 		Backends:       backends,
 		Order:          order,
+		PausedBackends: paused,
 		UsageLimits:    limits,
 		MaxObjectSizes: maxSizes,
 		Breakers:       breakers,
@@ -487,6 +493,7 @@ func ProvideBackendRuntime(i do.Injector) (*infra.BackendRuntime, error) {
 	rt := infra.New(&infra.Config{
 		Backends:        br.Backends,
 		Order:           br.Order,
+		PausedBackends:  br.PausedBackends,
 		BackendTimeout:  cfg.Server.BackendTimeout,
 		Usage:           usage,
 		RoutingStrategy: cfg.RoutingStrategy,

@@ -70,6 +70,8 @@ type cloudflareAccountUsage struct {
 	ProxyEditable      bool
 	ProfileID          string
 	AuthMode           string
+	Paused             bool
+	PauseEditable      bool
 }
 
 func cloudflareUsage(views []backendmanage.View, data *dashboard.Data) []cloudflareAccountUsage {
@@ -100,6 +102,8 @@ func mergeCloudflareUsage(groups map[string]*cloudflareAccountUsage, view *backe
 	}
 	account.Managed = account.Managed || view.Managed
 	account.ProxyEditable = account.ProxyEditable && view.AccountID != ""
+	account.Paused = account.Paused || view.Paused
+	account.PauseEditable = account.PauseEditable && view.AccountID != ""
 	if account.ProfileID == "" {
 		account.ProfileID = view.ProfileID
 	}
@@ -137,6 +141,7 @@ func newCloudflareAccountUsage(view *backendmanage.View, key string) *cloudflare
 		Label: label, AccountID: view.AccountID, AccountIDShort: shortID, QuotaGroup: key, Proxy: view.Proxy,
 		FreeTierBytes: view.FreeTierBytes, AdmissibleBytes: view.AdmissibleBytes,
 		WarningPercent: view.WarningPercent, Managed: view.Managed, ProxyEditable: view.AccountID != "",
+		Paused: view.Paused, PauseEditable: view.AccountID != "",
 		ProfileID: view.ProfileID, AuthMode: view.AuthMode,
 	}
 }

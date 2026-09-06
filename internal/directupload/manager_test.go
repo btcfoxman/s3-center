@@ -3,6 +3,7 @@ package directupload
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"path/filepath"
@@ -14,6 +15,7 @@ import (
 	"github.com/afreidah/s3-orchestrator/internal/backend"
 	"github.com/afreidah/s3-orchestrator/internal/backend/backendtest"
 	"github.com/afreidah/s3-orchestrator/internal/config"
+	"github.com/afreidah/s3-orchestrator/internal/store/core"
 	"github.com/afreidah/s3-orchestrator/internal/store/sqlite"
 )
 
@@ -133,6 +135,51 @@ func TestPhysicalObjectKeyPreservesOnlySafeExtensions(t *testing.T) {
 		if actual := physicalObjectKey("du_test", logicalKey); actual != expected {
 			t.Fatalf("physicalObjectKey(%q) = %q, want %q", logicalKey, actual, expected)
 		}
+	}
+}
+
+func TestCreateSkipsWritePausedBackend(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store, err := sqlite.NewStore(ctx, &config.DatabaseConfig{Path: filepath.Join(t.TempDir(), "metadata.db")}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(store.Close)
+	backends := []config.BackendConfig{
+		{Name: "r2-paused", QuotaBytes: 1 << 30, QuotaGroup: "cf-paused", RawLimitBytes: 1 << 30, BillingPolicy: "free_capped"},
+		{Name: "r2-active", QuotaBytes: 1 << 30, QuotaGroup: "cf-active", RawLimitBytes: 1 << 30, BillingPolicy: "free_capped"},
+	}
+	if err := store.SyncQuotaLimits(ctx, backends); err != nil {
+		t.Fatal(err)
+	}
+	fleet := staticFleet{
+		backends: map[string]backend.ObjectBackend{"r2-paused": newFakeDirectBackend(), "r2-active": newFakeDirectBackend()},
+		order:    []string{"r2-paused", "r2-active"}, writePaused: map[string]bool{"r2-paused": true},
+	}
+	manager, err := NewWithFleet(&config.DirectUploadConfig{
+		Enabled: true, PresignTTL: time.Hour, SessionTTL: time.Hour, MaxObjectSize: 1 << 20,
+	}, store, fleet, []config.BucketConfig{{Name: "assets"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := manager.Create(ctx, CreateRequest{
+		Bucket: "assets", Key: "new.bin", Size: 4, IdempotencyKey: "pause-routing-1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Session.BackendName != "r2-active" {
+		t.Fatalf("selected backend = %q, want r2-active", result.Session.BackendName)
+	}
+
+	fleet.writePaused["r2-active"] = true
+	manager.fleet = fleet
+	_, err = manager.Create(ctx, CreateRequest{
+		Bucket: "assets", Key: "blocked.bin", Size: 4, IdempotencyKey: "pause-routing-2",
+	})
+	if !errors.Is(err, core.ErrNoSpaceAvailable) {
+		t.Fatalf("all-paused create error = %v, want ErrNoSpaceAvailable", err)
 	}
 }
 

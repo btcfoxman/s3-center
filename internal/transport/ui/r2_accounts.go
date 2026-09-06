@@ -71,3 +71,30 @@ func (h *Handler) handleAPIR2AccountProxy(w http.ResponseWriter, r *http.Request
 	h.log.InfoContext(r.Context(), "R2 account proxy updated", "account_id", request.AccountID, "backends", len(views))
 	httputil.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "accounts": views})
 }
+
+func (h *Handler) handleAPIR2AccountState(w http.ResponseWriter, r *http.Request) {
+	setSecurityHeaders(w)
+	if h.backendManagement == nil || !h.backendManagement.Enabled() {
+		httputil.WriteJSONError(w, http.StatusServiceUnavailable, "dynamic R2 account management is disabled")
+		return
+	}
+	if !httputil.RequireMethod(w, r, http.MethodPost) {
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 8<<10)
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	var request backendmanage.SetAccountPausedRequest
+	if err := decoder.Decode(&request); err != nil {
+		httputil.WriteJSONError(w, http.StatusBadRequest, "invalid account state")
+		return
+	}
+	views, err := h.backendManagement.SetAccountPaused(r.Context(), &request)
+	if err != nil {
+		h.log.WarnContext(r.Context(), "R2 account state update failed", "account_id", request.AccountID, "paused", request.Paused, "error", err)
+		httputil.WriteJSONError(w, http.StatusUnprocessableEntity, err.Error())
+		return
+	}
+	h.log.InfoContext(r.Context(), "R2 account state updated", "account_id", request.AccountID, "paused", request.Paused, "backends", len(views))
+	httputil.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "paused": request.Paused, "accounts": views})
+}

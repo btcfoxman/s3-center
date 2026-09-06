@@ -273,6 +273,70 @@
     element.textContent = message;
   }
 
+  const accountStateDialog = document.getElementById('account-state-dialog');
+  const accountStateForm = document.getElementById('account-state-form');
+  const accountStateID = document.getElementById('account-state-id');
+  const accountStatePaused = document.getElementById('account-state-paused');
+  const accountStateLabel = document.getElementById('account-state-label');
+  const accountStateTitle = document.getElementById('account-state-title');
+  const accountStateDescription = document.getElementById('account-state-description');
+  const accountStateStatus = document.getElementById('account-state-status');
+  const accountStateSubmit = document.getElementById('account-state-submit');
+  const accountStateCancel = document.getElementById('account-state-cancel');
+
+  if (accountStateDialog && accountStateForm) {
+    document.querySelectorAll('.cf-account-state').forEach(function (button) {
+      button.addEventListener('click', function () {
+        const shouldPause = button.dataset.paused !== 'true';
+        accountStateID.value = button.dataset.accountId || '';
+        accountStatePaused.value = shouldPause ? 'true' : 'false';
+        accountStateLabel.textContent = button.dataset.accountLabel || button.dataset.accountId || '';
+        accountStateTitle.textContent = shouldPause ? '暂停账号写入' : '恢复账号写入';
+        accountStateDescription.textContent = shouldPause
+          ? '该账号下的全部 R2 Bucket 将立即退出新对象调度。'
+          : '该账号下的全部 R2 Bucket 将重新进入新对象调度。';
+        const impact = accountStateDialog.querySelectorAll('.account-state-impact div');
+        const messages = shouldPause ? [
+          ['停止', '新建直传、S3 写入与自动副本目标'],
+          ['保留', '已有对象读取、签名、列举和上游删除'],
+          ['注意', '已签发的 R2 临时 URL 会持续到原过期时间，无法提前撤销']
+        ] : [
+          ['恢复', '新的上传请求可以再次选择该账号'],
+          ['不迁移', '已有对象保持原位置，不会触发自动搬运'],
+          ['校验', '实际分配仍受健康状态、安全容量与路由策略约束']
+        ];
+        impact.forEach(function (row, index) {
+          row.querySelector('b').textContent = messages[index][0];
+          row.querySelector('span').textContent = messages[index][1];
+        });
+        accountStateSubmit.textContent = shouldPause ? '确认暂停' : '恢复写入';
+        accountStateSubmit.classList.toggle('btn-danger', shouldPause);
+        accountStateSubmit.classList.toggle('btn-primary', !shouldPause);
+        accountStateDialog.classList.toggle('resume-mode', !shouldPause);
+        accountStateSubmit.disabled = false;
+        setStatus(accountStateStatus, '', '');
+        accountStateDialog.showModal();
+      });
+    });
+
+    accountStateCancel.addEventListener('click', function () { accountStateDialog.close(); });
+    accountStateForm.addEventListener('submit', function (event) {
+      event.preventDefault();
+      const shouldPause = accountStatePaused.value === 'true';
+      accountStateSubmit.disabled = true;
+      setStatus(accountStateStatus, 'checking', shouldPause ? '正在停止该账号的新对象分配…' : '正在恢复该账号的新对象分配…');
+      postJSON('api/r2-account-state', {account_id: accountStateID.value, paused: shouldPause})
+        .then(function (body) {
+          const count = Array.isArray(body.accounts) ? body.accounts.length : 0;
+          setStatus(accountStateStatus, 'success', (shouldPause ? '已暂停 ' : '已恢复 ') + count + ' 个 Backend，状态已持久化。');
+          setTimeout(function () { location.reload(); }, 700);
+        }).catch(function (error) {
+          setStatus(accountStateStatus, 'error', error.message);
+          accountStateSubmit.disabled = false;
+        });
+    });
+  }
+
   const proxyDialog = document.getElementById('proxy-dialog');
   const proxyForm = document.getElementById('proxy-form');
   if (!proxyDialog || !proxyForm) return;

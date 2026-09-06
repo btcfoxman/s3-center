@@ -45,7 +45,7 @@ type stubBackend struct{ backend.ObjectBackend }
 func TestBackendRegistry_GetAndAllAndOrder(t *testing.T) {
 	t.Parallel()
 	b1, b2 := &stubBackend{}, &stubBackend{}
-	r := newBackendRegistry(map[string]backend.ObjectBackend{"b1": b1, "b2": b2}, []string{"b1", "b2"})
+	r := newBackendRegistry(map[string]backend.ObjectBackend{"b1": b1, "b2": b2}, []string{"b1", "b2"}, nil)
 
 	got, err := r.Get("b1")
 	if err != nil || got != b1 {
@@ -66,7 +66,7 @@ func TestBackendRegistryReplacePreservesOrderAndReturnsPrevious(t *testing.T) {
 	t.Parallel()
 	old := &stubBackend{}
 	replacement := &stubBackend{}
-	r := newBackendRegistry(map[string]backend.ObjectBackend{"b1": old}, []string{"b1"})
+	r := newBackendRegistry(map[string]backend.ObjectBackend{"b1": old}, []string{"b1"}, nil)
 
 	previous, err := r.Replace("b1", replacement)
 	if err != nil {
@@ -86,7 +86,7 @@ func TestBackendRegistryReplacePreservesOrderAndReturnsPrevious(t *testing.T) {
 
 func TestBackendRegistry_ExcludeDraining_NoCheckerWiredKeepsAll(t *testing.T) {
 	t.Parallel()
-	r := newBackendRegistry(nil, []string{"a", "b"})
+	r := newBackendRegistry(nil, []string{"a", "b"}, nil)
 	got := r.ExcludeDraining([]string{"a", "b"})
 	if len(got) != 2 {
 		t.Errorf("ExcludeDraining = %v, want both (no checker wired)", got)
@@ -95,7 +95,7 @@ func TestBackendRegistry_ExcludeDraining_NoCheckerWiredKeepsAll(t *testing.T) {
 
 func TestBackendRegistry_ExcludeDraining_DropsActiveDrains(t *testing.T) {
 	t.Parallel()
-	r := newBackendRegistry(nil, []string{"a", "b", "c"})
+	r := newBackendRegistry(nil, []string{"a", "b", "c"}, nil)
 	r.SetDrainChecker(staticDrainChecker{"b": true})
 	got := r.ExcludeDraining([]string{"a", "b", "c"})
 	if len(got) != 2 || got[0] != "a" || got[1] != "c" {

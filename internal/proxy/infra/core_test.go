@@ -104,7 +104,7 @@ func TestCore_AddBackendUpdatesLiveFleetAndLimits(t *testing.T) {
 	t.Parallel()
 	c := newTestCore(t)
 	limits := core.UsageLimits{APIRequestLimit: 7}
-	if err := c.AddBackend("runtime-r2", fakeBackend{}, 4096, limits); err != nil {
+	if err := c.AddBackend("runtime-r2", fakeBackend{}, 4096, limits, false); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := c.GetBackend("runtime-r2"); err != nil {
@@ -131,6 +131,36 @@ func TestCore_DrainForwarders_NoCheckerThenWired(t *testing.T) {
 	}
 	if got := c.ExcludeDraining([]string{"b1", "b2"}); len(got) != 1 || got[0] != "b2" {
 		t.Errorf("ExcludeDraining = %v, want [b2]", got)
+	}
+}
+
+func TestCore_WritePauseExcludesOnlyNewPlacement(t *testing.T) {
+	t.Parallel()
+	tracker := counter.NewUsageTracker(counter.NewLocalCounterBackend([]string{"b1", "b2"}), nil)
+	c := New(&Config{
+		Backends:       map[string]backend.ObjectBackend{"b1": fakeBackend{}, "b2": fakeBackend{}},
+		Order:          []string{"b1", "b2"},
+		PausedBackends: map[string]bool{"b1": true},
+		Usage:          tracker,
+	})
+
+	if !c.IsBackendWritePaused("b1") {
+		t.Fatal("initial paused state was not loaded")
+	}
+	if _, err := c.GetBackend("b1"); err != nil {
+		t.Fatalf("paused backend must remain readable: %v", err)
+	}
+	if got := c.EligibleForWrite(1, 0, 1); len(got) != 1 || got[0] != "b2" {
+		t.Fatalf("eligible while b1 paused = %v, want [b2]", got)
+	}
+	if err := c.SetBackendWritePaused("b1", false); err != nil {
+		t.Fatal(err)
+	}
+	if got := c.EligibleForWrite(1, 0, 1); len(got) != 2 {
+		t.Fatalf("eligible after resume = %v, want both backends", got)
+	}
+	if err := c.SetBackendWritePaused("missing", true); err == nil {
+		t.Fatal("pausing an unknown backend should fail")
 	}
 }
 

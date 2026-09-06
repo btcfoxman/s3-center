@@ -39,6 +39,7 @@ type Definition struct {
 	Version    int                  `json:"version"`
 	Backend    config.BackendConfig `json:"backend"`
 	Managed    bool                 `json:"managed"`
+	Paused     bool                 `json:"paused,omitempty"`
 	Connection *Connection          `json:"connection,omitempty"`
 }
 
@@ -82,6 +83,14 @@ type UpdateProxyRequest struct {
 	ProxyURL  string `json:"proxy_url"`
 }
 
+// SetAccountPausedRequest changes new-placement eligibility for every
+// backend belonging to one Cloudflare account. It does not remove the live
+// clients, so existing objects remain readable and deletable.
+type SetAccountPausedRequest struct {
+	AccountID string `json:"account_id"`
+	Paused    bool   `json:"paused"`
+}
+
 // View is safe to return to browsers. Credentials and proxy userinfo are never
 // included.
 type View struct {
@@ -99,6 +108,7 @@ type View struct {
 	IdentityID      string `json:"identity_id,omitempty"`
 	ProfileID       string `json:"profile_id,omitempty"`
 	AuthMode        string `json:"auth_mode,omitempty"`
+	Paused          bool   `json:"paused"`
 }
 
 type Store interface {
@@ -218,6 +228,7 @@ func viewOf(definition *Definition) View {
 		Bucket: b.Bucket, QuotaGroup: b.QuotaGroup, FreeTierBytes: b.RawLimitBytes,
 		AdmissibleBytes: b.QuotaBytes, WarningPercent: b.WarningPercent,
 		Proxy: proxy, Managed: definition.Managed,
+		Paused: definition.Paused,
 	}
 	if definition.Connection != nil {
 		view.IdentityID = definition.Connection.IdentityID
@@ -258,6 +269,7 @@ func (m *Manager) create(ctx context.Context, request *CreateRequest, connection
 		m.mu.RUnlock()
 		return View{}, fmt.Errorf("backend %q already exists", name)
 	}
+	definition.Paused = m.accountWritePausedLocked(definition.Backend.AccountID)
 	m.mu.RUnlock()
 
 	live, cbBackend, err := m.probeBackend(ctx, definition)
@@ -287,7 +299,7 @@ func (m *Manager) create(ctx context.Context, request *CreateRequest, connection
 		EgressByteLimit:  definition.Backend.EgressByteLimit,
 		IngressByteLimit: definition.Backend.IngressByteLimit,
 	}
-	if err := m.runtime.AddBackend(name, live, definition.Backend.MaxObjectSize, limits); err != nil {
+	if err := m.runtime.AddBackend(name, live, definition.Backend.MaxObjectSize, limits, definition.Paused); err != nil {
 		return View{}, err
 	}
 	if cbBackend != nil && m.breakerRegistry != nil {
@@ -298,6 +310,15 @@ func (m *Manager) create(ctx context.Context, request *CreateRequest, connection
 	m.mu.Unlock()
 	rollback = false
 	return viewOf(definition), nil
+}
+
+func (m *Manager) accountWritePausedLocked(accountID string) bool {
+	for _, existing := range m.definitions {
+		if existing.Backend.AccountID == accountID && existing.Paused {
+			return true
+		}
+	}
+	return false
 }
 
 // ConnectionForAccount returns the encrypted-definition fields needed to
@@ -381,6 +402,125 @@ func (m *Manager) UpdateAccountProxy(ctx context.Context, request *UpdateProxyRe
 		return nil, errors.Join(err, m.restoreStoredProxies(replacements))
 	}
 	return m.commitProxyReplacements(replacements), nil
+}
+
+type pauseReplacement struct {
+	definition        *Definition
+	previous          Definition
+	encrypted         []byte
+	previousEncrypted []byte
+}
+
+// SetAccountPaused persists and hot-applies one account-wide placement state.
+// Pausing only affects allocations made after the update; existing requests
+// and already-issued upstream presigned URLs are intentionally not revoked.
+func (m *Manager) SetAccountPaused(ctx context.Context, request *SetAccountPausedRequest) ([]View, error) {
+	if !m.Enabled() {
+		return nil, errors.New("managed backends are disabled")
+	}
+	if request == nil {
+		return nil, errors.New("account state is required")
+	}
+	request.AccountID = strings.ToLower(strings.TrimSpace(request.AccountID))
+	if !accountIDPattern.MatchString(request.AccountID) {
+		return nil, errors.New("cloudflare account ID must be 32 hexadecimal characters")
+	}
+
+	m.createMu.Lock()
+	defer m.createMu.Unlock()
+	targets, err := m.accountProxyTargets(request.AccountID)
+	if err != nil {
+		return nil, err
+	}
+
+	replacements := make([]pauseReplacement, 0, len(targets))
+	for idx := range targets {
+		previous := targets[idx]
+		updated := previous
+		updated.Managed = true
+		updated.Paused = request.Paused
+		encrypted, sealErr := m.cipher.seal(updated.Backend.Name, &updated)
+		if sealErr != nil {
+			return nil, sealErr
+		}
+		previousEncrypted, sealErr := m.cipher.seal(previous.Backend.Name, &previous)
+		if sealErr != nil {
+			return nil, sealErr
+		}
+		replacements = append(replacements, pauseReplacement{
+			definition: &updated, previous: previous,
+			encrypted: encrypted, previousEncrypted: previousEncrypted,
+		})
+	}
+
+	if err := m.persistPauseReplacements(ctx, replacements); err != nil {
+		return nil, err
+	}
+	applied := 0
+	for idx := range replacements {
+		item := &replacements[idx]
+		if err := m.runtime.SetBackendWritePaused(item.definition.Backend.Name, request.Paused); err != nil {
+			runtimeErr := m.restoreRuntimePause(replacements[:applied])
+			storeErr := m.restoreStoredPause(replacements)
+			return nil, errors.Join(err, runtimeErr, storeErr)
+		}
+		applied++
+	}
+
+	m.mu.Lock()
+	for idx := range replacements {
+		item := &replacements[idx]
+		m.definitions[item.definition.Backend.Name] = item.definition
+	}
+	m.mu.Unlock()
+
+	views := make([]View, 0, len(replacements))
+	for idx := range replacements {
+		views = append(views, viewOf(replacements[idx].definition))
+	}
+	return views, nil
+}
+
+func (m *Manager) persistPauseReplacements(ctx context.Context, replacements []pauseReplacement) error {
+	persisted := 0
+	for idx := range replacements {
+		item := &replacements[idx]
+		if err := m.store.UpsertManagedBackend(ctx, item.definition.Backend.Name, item.encrypted); err != nil {
+			return errors.Join(err, m.restoreStoredPause(replacements[:persisted]))
+		}
+		persisted++
+	}
+	return nil
+}
+
+func (m *Manager) restoreRuntimePause(replacements []pauseReplacement) error {
+	var restoreErr error
+	for idx := len(replacements) - 1; idx >= 0; idx-- {
+		item := &replacements[idx]
+		if err := m.runtime.SetBackendWritePaused(item.previous.Backend.Name, item.previous.Paused); err != nil {
+			restoreErr = errors.Join(restoreErr, err)
+		}
+	}
+	return restoreErr
+}
+
+func (m *Manager) restoreStoredPause(replacements []pauseReplacement) error {
+	restoreCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	var restoreErr error
+	for idx := range replacements {
+		item := &replacements[idx]
+		var err error
+		if item.previous.Managed {
+			err = m.store.UpsertManagedBackend(restoreCtx, item.previous.Backend.Name, item.previousEncrypted)
+		} else {
+			err = m.store.DeleteManagedBackend(restoreCtx, item.previous.Backend.Name)
+		}
+		if err != nil {
+			restoreErr = errors.Join(restoreErr, fmt.Errorf("restore backend %q pause state: %w", item.previous.Backend.Name, err))
+		}
+	}
+	return restoreErr
 }
 
 func (m *Manager) accountProxyTargets(accountID string) ([]Definition, error) {
