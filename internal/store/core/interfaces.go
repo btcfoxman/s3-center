@@ -229,6 +229,17 @@ type ManagedBackendStore interface {
 	DeleteManagedBackend(ctx context.Context, name string) error
 }
 
+// LifecyclePolicyStore persists hour-granularity retention policies created
+// from the management console. It is intentionally separate from
+// ExpiredObjectsLister: policy administration and object scanning have
+// different consumers and failure domains.
+type LifecyclePolicyStore interface {
+	ListLifecyclePolicies(ctx context.Context) ([]LifecyclePolicy, error)
+	CreateLifecyclePolicy(ctx context.Context, prefix string, expirationHours int) (*LifecyclePolicy, error)
+	SetLifecyclePolicyEnabled(ctx context.Context, id int64, enabled bool) (*LifecyclePolicy, error)
+	DeleteLifecyclePolicy(ctx context.Context, id int64) (bool, error)
+}
+
 // AdvisoryLocker defines the leader-election helper used by background
 // services. SQLite implementations no-op since the engine serializes
 // writers; on Postgres this is pg_try_advisory_lock with the supplied

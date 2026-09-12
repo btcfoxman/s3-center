@@ -380,11 +380,80 @@
     {{end}}
   </section>
 
+  <!-- Retention policies -->
+  <section class="retention-section" id="retention-policies">
+    <div class="section-heading section-heading-actions">
+      <div>
+        <span class="section-index">06 · RETENTION AUTOMATION</span>
+        <h2>按创建时间自动清理</h2>
+        <p>为逻辑 Bucket 或目录设置小时级保留期，到期后删除索引及所有上游副本</p>
+      </div>
+      <div class="retention-cadence"><i></i><span>扫描周期</span><b>5 MIN</b></div>
+    </div>
+
+    <div class="retention-safety-grid">
+      <div><b>时间基准</b><span>以 S3 Center 索引中的对象创建时间为准，覆盖写入后重新计时</span></div>
+      <div><b>删除路径</b><span>直接调用对象所在 R2/S3；失败副本进入 Cleanup Queue 重试</span></div>
+      <div><b>边界保护</b><span>策略至少限定到一个逻辑 Bucket，不会扫描未纳入索引的对象</span></div>
+    </div>
+
+    {{if .LifecyclePolicyError}}<div class="retention-error" role="alert">{{.LifecyclePolicyError}}</div>{{end}}
+    {{if gt .StaticLifecycleRules 0}}<div class="retention-static-note">另有 {{.StaticLifecycleRules}} 条 config.yaml 静态规则生效；相同目录不能重复创建动态策略。</div>{{end}}
+
+    <div class="retention-layout">
+      <div class="retention-policy-list" aria-label="自动清理策略列表">
+        {{range .LifecyclePolicies}}
+        <article class="retention-policy{{if not .Enabled}} is-disabled{{end}}" data-policy-id="{{.ID}}">
+          <div class="retention-policy-rail" aria-hidden="true"><i></i><span></span></div>
+          <div class="retention-policy-main">
+            <div class="retention-policy-head">
+              <span class="retention-state">{{if .Enabled}}ACTIVE{{else}}PAUSED{{end}}</span>
+              <span class="retention-policy-id">POLICY / {{.ID}}</span>
+            </div>
+            <code>{{.Prefix}}</code>
+            <div class="retention-window"><b>{{.ExpirationHours}}</b><span>小时后清理</span></div>
+            <p>{{if .Enabled}}到期对象将在下一轮扫描中进入标准删除链路{{else}}策略已暂停，不会产生新的自动删除{{end}}</p>
+          </div>
+          <div class="retention-policy-actions">
+            <button type="button" class="btn-action lifecycle-toggle" data-id="{{.ID}}" data-prefix="{{.Prefix}}" data-hours="{{.ExpirationHours}}" data-enabled="{{.Enabled}}">{{if .Enabled}}暂停{{else}}恢复{{end}}</button>
+            <button type="button" class="lifecycle-remove" data-id="{{.ID}}" data-prefix="{{.Prefix}}">删除策略</button>
+          </div>
+        </article>
+        {{else}}
+        <div class="retention-empty">
+          <span>00</span>
+          <div><b>暂无自动清理策略</b><p>创建前不会自动删除任何存储文件。</p></div>
+        </div>
+        {{end}}
+      </div>
+
+      {{if .LifecyclePolicyEnabled}}
+      <form id="lifecycle-policy-form" class="retention-form">
+        <div class="retention-form-heading"><span>NEW POLICY</span><h3>设置保留窗口</h3><p>保存后立即启用；已经超过保留期的对象会在下一轮扫描处理。</p></div>
+        <label>逻辑 Bucket
+          <select id="lifecycle-bucket" name="bucket" required>{{range .Buckets}}<option value="{{.}}">{{.}}</option>{{end}}</select>
+        </label>
+        <label>目录前缀 <span>可留空，表示整个 Bucket</span>
+          <input id="lifecycle-directory" name="directory" type="text" maxlength="900" placeholder="例如 temp/render-cache">
+        </label>
+        <label>创建后保留小时数
+          <div class="retention-hours-input"><input id="lifecycle-hours" name="expiration_hours" type="number" min="1" max="87600" value="24" required><span>HOURS</span></div>
+        </label>
+        <label class="retention-ack"><input id="lifecycle-ack" type="checkbox" required><span>我理解启用后会永久删除到期的上游对象及其所有副本。</span></label>
+        <button id="lifecycle-submit" class="btn-danger" type="submit">创建并启用策略</button>
+        <div id="lifecycle-status" class="form-status" role="status" aria-live="polite"></div>
+      </form>
+      {{else}}
+      <div class="retention-form retention-unavailable"><b>策略存储不可用</b><p>当前数据库驱动未提供动态生命周期策略能力。</p></div>
+      {{end}}
+    </div>
+  </section>
+
   <!-- Configuration -->
   <section class="configuration-section">
     <div class="section-heading">
       <div>
-        <span class="section-index">06 · RUNTIME PROFILE</span>
+        <span class="section-index">07 · RUNTIME PROFILE</span>
         <h2>运行配置</h2>
         <p>当前生效的路由、冗余与数据保护策略</p>
       </div>
@@ -453,7 +522,7 @@
   <section class="logs-section">
     <div class="section-heading section-heading-actions">
       <div>
-        <span class="section-index">07 · EVENT STREAM</span>
+        <span class="section-index">08 · EVENT STREAM</span>
         <h2>运行日志</h2>
         <p>筛选并检查最近的控制平面事件</p>
       </div>
@@ -492,6 +561,26 @@
     <button id="confirm-delete-cancel" type="button">取消</button>
     <button id="confirm-delete-ok" type="button" class="btn-danger">确认删除</button>
   </div>
+</dialog>
+
+<dialog id="lifecycle-policy-dialog" class="proxy-dialog lifecycle-policy-dialog">
+  <form id="lifecycle-policy-action-form" method="dialog">
+    <div class="dialog-heading">
+      <span class="section-index">RETENTION CONTROL</span>
+      <h2 id="lifecycle-action-title">暂停自动清理</h2>
+      <p id="lifecycle-action-description"></p>
+    </div>
+    <input id="lifecycle-action-id" type="hidden">
+    <input id="lifecycle-action-name" type="hidden">
+    <input id="lifecycle-action-enabled" type="hidden">
+    <div class="account-state-target"><span>策略范围</span><strong id="lifecycle-action-prefix"></strong></div>
+    <label id="lifecycle-action-ack-wrap" class="retention-ack dialog-ack" hidden><input id="lifecycle-action-ack" type="checkbox"><span>我确认恢复后，到期对象会被永久删除。</span></label>
+    <div id="lifecycle-action-status" class="form-status" role="status" aria-live="polite"></div>
+    <div class="dialog-actions">
+      <button id="lifecycle-action-cancel" type="button">取消</button>
+      <button id="lifecycle-action-submit" type="submit" class="btn-danger">确认暂停</button>
+    </div>
+  </form>
 </dialog>
 
 <dialog id="proxy-dialog" class="proxy-dialog">
@@ -668,5 +757,6 @@
 <script src="static/tree.js?v={{.Version}}"></script>
 <script src="static/logs.js?v={{.Version}}"></script>
 <script src="static/accounts.js?v={{.Version}}"></script>
+<script src="static/lifecycle.js?v={{.Version}}"></script>
 </body>
 </html>

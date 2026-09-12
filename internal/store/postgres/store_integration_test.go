@@ -699,6 +699,57 @@ func TestStoreInt_CleanupQueueLifecycle(t *testing.T) {
 }
 
 // -------------------------------------------------------------------------
+// LIFECYCLE POLICIES
+// -------------------------------------------------------------------------
+
+func TestStoreInt_LifecyclePolicies(t *testing.T) {
+	s := adapterPgStore(t)
+	ctx := context.Background()
+	prefix := t.Name() + "/"
+
+	created, err := s.CreateLifecyclePolicy(ctx, prefix, 18)
+	if err != nil {
+		t.Fatalf("CreateLifecyclePolicy: %v", err)
+	}
+	if created.Prefix != prefix || created.ExpirationHours != 18 || !created.Enabled {
+		t.Fatalf("created policy = %+v", created)
+	}
+	if _, err := s.CreateLifecyclePolicy(ctx, prefix, 9); !errors.Is(err, core.ErrLifecyclePolicyConflict) {
+		t.Fatalf("duplicate error = %v, want ErrLifecyclePolicyConflict", err)
+	}
+
+	policies, err := s.ListLifecyclePolicies(ctx)
+	if err != nil {
+		t.Fatalf("ListLifecyclePolicies: %v", err)
+	}
+	found := false
+	for _, policy := range policies {
+		if policy.ID == created.ID {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("created policy %d not returned by list", created.ID)
+	}
+
+	paused, err := s.SetLifecyclePolicyEnabled(ctx, created.ID, false)
+	if err != nil || paused.Enabled {
+		t.Fatalf("SetLifecyclePolicyEnabled: policy=%+v err=%v", paused, err)
+	}
+	deleted, err := s.DeleteLifecyclePolicy(ctx, created.ID)
+	if err != nil || !deleted {
+		t.Fatalf("DeleteLifecyclePolicy: deleted=%v err=%v", deleted, err)
+	}
+	deleted, err = s.DeleteLifecyclePolicy(ctx, created.ID)
+	if err != nil || deleted {
+		t.Fatalf("second DeleteLifecyclePolicy: deleted=%v err=%v", deleted, err)
+	}
+	if _, err := s.SetLifecyclePolicyEnabled(ctx, created.ID, true); !errors.Is(err, core.ErrLifecyclePolicyNotFound) {
+		t.Fatalf("missing update error = %v, want ErrLifecyclePolicyNotFound", err)
+	}
+}
+
+// -------------------------------------------------------------------------
 // OBJECT LIST QUERIES
 // -------------------------------------------------------------------------
 

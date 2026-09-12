@@ -16,6 +16,7 @@ package ui
 
 import (
 	"bytes"
+	"context"
 	"net/http"
 	"sort"
 	"strings"
@@ -46,6 +47,10 @@ type dashboardPage struct {
 	ManagedBackendsEnabled bool
 	CloudflareOAuthEnabled bool
 	IndexOnly              bool
+	LifecyclePolicies      []core.LifecyclePolicy
+	LifecyclePolicyEnabled bool
+	LifecyclePolicyError   string
+	StaticLifecycleRules   int
 }
 
 type cloudflareAccountUsage struct {
@@ -268,6 +273,7 @@ func (h *Handler) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		totalLimit = 0
 	}
 
+	lifecyclePolicies, lifecyclePolicyEnabled, lifecyclePolicyError := h.lifecyclePolicyPageData(r.Context())
 	page := dashboardPage{
 		Version:                telemetry.Version,
 		DBHealthy:              h.dbHealthy(),
@@ -279,6 +285,10 @@ func (h *Handler) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		ManagedBackendsEnabled: h.backendManagement != nil && h.backendManagement.Enabled(),
 		CloudflareOAuthEnabled: h.cloudflareOnboarding != nil && h.cloudflareOnboarding.Enabled(),
 		IndexOnly:              cfg.DirectUpload.IndexOnly,
+		LifecyclePolicies:      lifecyclePolicies,
+		LifecyclePolicyEnabled: lifecyclePolicyEnabled,
+		LifecyclePolicyError:   lifecyclePolicyError,
+		StaticLifecycleRules:   len(cfg.Lifecycle.Rules),
 		Config: configSummary{
 			RoutingStrategy:           string(cfg.RoutingStrategy),
 			ReplicationFactor:         cfg.Replication.Factor,
@@ -299,7 +309,6 @@ func (h *Handler) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	if h.backendManagement != nil {
 		page.CloudflareAccounts = cloudflareUsage(h.backendManagement.List(), data)
 	}
-
 	var buf bytes.Buffer
 	if err := h.templates.ExecuteTemplate(&buf, "dashboard.html", page); err != nil {
 		h.log.ErrorContext(r.Context(), "failed to render dashboard", "error", err)
@@ -308,6 +317,18 @@ func (h *Handler) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set(headerContentType, contentTypeHTML)
 	_, _ = buf.WriteTo(w)
+}
+
+func (h *Handler) lifecyclePolicyPageData(ctx context.Context) ([]core.LifecyclePolicy, bool, string) {
+	if h.lifecyclePolicies == nil {
+		return nil, false, ""
+	}
+	policies, err := h.lifecyclePolicies.ListLifecyclePolicies(ctx)
+	if err != nil {
+		h.log.ErrorContext(ctx, "failed to load lifecycle policies for dashboard", "error", err)
+		return nil, true, "无法读取自动清理策略，请检查数据库状态"
+	}
+	return policies, true, ""
 }
 
 // handleAPIDashboard returns dashboard data as JSON.

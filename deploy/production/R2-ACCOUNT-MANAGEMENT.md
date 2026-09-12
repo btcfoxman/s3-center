@@ -133,6 +133,35 @@ curl -X DELETE -H "X-Admin-Token: $ADMIN_API_TOKEN" \
 
 目录是对象 Key 的前缀，不是 R2 中的真实文件夹。该操作只删除 S3 Center 索引内的对象；绕过本系统写入且尚未同步到索引的上游对象不会被误删。
 
+## 按创建时间自动清理
+
+管理端 **按创建时间自动清理** 区域可以为一个逻辑 Bucket 或其目录设置小时级保留期：
+
+1. 选择逻辑 Bucket，例如 `assets`。
+2. 可选填写目录前缀，例如 `temp/render-cache`；留空表示整个 Bucket。
+3. 填写创建后保留小时数（1–87,600）。
+4. 确认永久删除影响后点击 **创建并启用策略**。
+
+策略保存在 PostgreSQL，服务重启、容器重建和 GitHub Actions 重新部署都不会丢失。可以随时暂停、恢复或删除策略；删除策略本身不会删除尚存对象，恢复策略时已经过期的对象可能在下一轮扫描立即被清理。
+
+生命周期任务每 5 分钟扫描一次，以 S3 Center 索引中的逻辑对象 `created_at` 为基准。到期删除会定位对象的全部实际 R2/S3 副本，通过各 Backend 配置的代理直接调用上游删除 API，并同步释放索引额度。失败的物理删除进入 Cleanup Queue 重试，文件内容不会下载或经过 S3 Center。覆盖写入会产生新的对象版本与创建时间，因此从覆盖成功时重新计算保留期。
+
+该功能只处理已进入 S3 Center 索引、且匹配所选逻辑 Bucket/目录的对象，不会扫描或删除绕过系统写入的未索引对象。对象一旦在上游删除，之前签发的临时访问 URL 即使尚未到期也会返回上游 `404`；若上游删除暂时失败，则 URL 可能在重试成功前继续可用。
+
+管理员也可以继续使用兼容的静态 YAML 规则：
+
+```yaml
+lifecycle:
+  batch_size: 100
+  rules:
+    - prefix: "assets/temp/"
+      expiration_hours: 12
+    - prefix: "assets/archive/"
+      expiration_days: 30
+```
+
+每条静态规则只能设置 `expiration_hours` 或 `expiration_days` 其中之一；同一完整前缀不能同时由 YAML 和管理端重复管理。
+
 ## 额度卡如何理解
 
 - Cloudflare R2 Standard 免费存储是每个 Account 每月 10 GB-month。页面把同一 Account ID 下所有已接入 Bucket 的本地已知对象与 orphan bytes 相加，展示当前水位。

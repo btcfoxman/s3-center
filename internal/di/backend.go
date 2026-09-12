@@ -578,6 +578,9 @@ func ProvideExpiryManager(i do.Injector) (*expiry.Manager, error) {
 		return nil, r.err
 	}
 	m := expiry.New(stores, objects, slog.Default().With(logfmt.Component("lifecycle")))
+	if policyStore, ok := stores.(core.LifecyclePolicyStore); ok {
+		m.SetPolicyStore(policyStore)
+	}
 	m.SetConfig(&cfg.Lifecycle)
 	return m, nil
 }

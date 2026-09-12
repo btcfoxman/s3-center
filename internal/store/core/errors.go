@@ -116,4 +116,7 @@ var (
 	ErrUploadSessionExpired  = errors.New("upload session expired")
 	ErrUploadSessionConflict = errors.New("upload session is not active")
 	ErrUploadSizeMismatch    = errors.New("uploaded object size does not match reservation")
+
+	ErrLifecyclePolicyNotFound = errors.New("lifecycle policy not found")
+	ErrLifecyclePolicyConflict = errors.New("a lifecycle policy already exists for this prefix")
 )

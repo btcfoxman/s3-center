@@ -32,5 +32,6 @@ type usageFlushOps interface {
 // needs to read the lifecycle config and process a tick.
 type lifecycleOps interface {
 	Config() *config.LifecycleConfig
-	ProcessRules(ctx context.Context, rules []config.LifecycleRule) (deleted, failed int)
+	HasPolicyStore() bool
+	ProcessConfigured(ctx context.Context) (deleted, failed int, err error)
 }

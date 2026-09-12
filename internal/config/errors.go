@@ -144,7 +144,8 @@ var (
 // Lifecycle errors.
 var (
 	ErrLifecyclePrefixRequired = errors.New("lifecycle.rules: prefix must not be empty (would match all objects)")
-	ErrInvalidExpiration       = errors.New("lifecycle.rules: expiration_days must be positive")
+	ErrInvalidExpiration       = errors.New("lifecycle.rules: expiration_days or expiration_hours must be positive")
+	ErrAmbiguousExpiration     = errors.New("lifecycle.rules: only one of expiration_days or expiration_hours may be set")
 	ErrDuplicatePrefix         = errors.New("duplicate prefix")
 )
 

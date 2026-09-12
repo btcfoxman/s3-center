@@ -171,12 +171,13 @@ backends:
 
 # --- Lifecycle rules (object expiration) ---
 # Prefix is required (empty prefix would match all objects). Rules with
-# expiration_days <= 0 are rejected at startup.
+# Set exactly one of expiration_days or expiration_hours; non-positive values
+# are rejected at startup.
 # lifecycle:
 #   batch_size: 100              # Objects per DB query (default: 100)
 #   rules:
-#     - prefix: "tmp/"
-#       expiration_days: 30
+#     - prefix: "mybucket/tmp/" # Full logical prefix includes the virtual bucket
+#       expiration_hours: 72
 
 # --- Per-IP rate limiting (disabled by default) ---
 # rate_limit:

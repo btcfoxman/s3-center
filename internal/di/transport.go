@@ -175,8 +175,14 @@ func ProvideUIHandler(i do.Injector) (*ui.Handler, error) {
 	opsSvc := resolve[*ops.Services](r)
 	backendManagement := resolve[*backendmanage.Manager](r)
 	cloudflareOnboarding := resolve[*cloudflareonboard.Service](r)
+	stores := resolve[core.MetadataStore](r)
 	if r.err != nil {
 		return nil, r.err
+	}
+
+	var lifecyclePolicies core.LifecyclePolicyStore
+	if store, ok := stores.(core.LifecyclePolicyStore); ok {
+		lifecyclePolicies = store
 	}
 
 	return ui.New(&ui.Deps{
@@ -194,6 +200,7 @@ func ProvideUIHandler(i do.Injector) (*ui.Handler, error) {
 		LoginThrottle:        loginThrottle,
 		BackendManagement:    backendManagement,
 		CloudflareOnboarding: cloudflareOnboarding,
+		LifecyclePolicies:    lifecyclePolicies,
 	}), nil
 }
 

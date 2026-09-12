@@ -37,7 +37,7 @@ import (
 // defaultLifecycleTick.
 const (
 	defaultUsageFlushInterval = 30 * time.Second
-	defaultLifecycleTick      = 1 * time.Hour
+	defaultLifecycleTick      = 5 * time.Minute
 )
 
 // -------------------------------------------------------------------------
@@ -156,14 +156,13 @@ func NewLifecycleService(manager lifecycleOps, locker tickrunner.AdvisoryLocker)
 		Log:      log,
 		ShouldRun: func() bool {
 			cfg := manager.Config()
-			return cfg != nil && len(cfg.Rules) > 0
+			return manager.HasPolicyStore() || (cfg != nil && len(cfg.Rules) > 0)
 		},
 		Work: func(ctx context.Context) error {
-			cfg := manager.Config()
-			if cfg == nil {
-				return nil
+			deleted, failed, err := manager.ProcessConfigured(ctx)
+			if err != nil {
+				return err
 			}
-			deleted, failed := manager.ProcessRules(ctx, cfg.Rules)
 			if deleted > 0 || failed > 0 {
 				log.InfoContext(ctx, "expiration completed",
 					"deleted", deleted, "failed", failed)

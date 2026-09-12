@@ -16,6 +16,7 @@ package expiry
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
 	"time"
 
@@ -76,6 +77,88 @@ func TestProcessRules_DeletesExpiredObjects(t *testing.T) {
 	})
 	if deleted != 1 || failed != 0 {
 		t.Errorf("deleted=%d failed=%d, want 1/0", deleted, failed)
+	}
+}
+
+func TestProcessRules_HourGranularitySetsCutoff(t *testing.T) {
+	t.Parallel()
+	ctrl := gomock.NewController(t)
+	m, lister, deleter := newManager(t, ctrl)
+
+	lister.EXPECT().ListExpiredObjects(gomock.Any(), "assets/tmp/", gomock.Any(), gomock.Any()).
+		DoAndReturn(func(_ context.Context, _ string, cutoff time.Time, _ int) ([]core.ObjectLocation, error) {
+			age := time.Since(cutoff)
+			if age < 3*time.Hour-time.Minute || age > 3*time.Hour+time.Minute {
+				t.Fatalf("cutoff age = %v, want approximately 3h", age)
+			}
+			return nil, nil
+		}).Times(1)
+	deleter.EXPECT().DeleteObject(gomock.Any(), gomock.Any()).Times(0)
+
+	deleted, failed := m.ProcessRules(t.Context(), []config.LifecycleRule{{
+		Prefix: "assets/tmp/", ExpirationHours: 3,
+	}})
+	if deleted != 0 || failed != 0 {
+		t.Fatalf("deleted=%d failed=%d, want 0/0", deleted, failed)
+	}
+}
+
+type policyStoreStub struct {
+	policies []core.LifecyclePolicy
+	err      error
+}
+
+func (s *policyStoreStub) ListLifecyclePolicies(context.Context) ([]core.LifecyclePolicy, error) {
+	return slices.Clone(s.policies), s.err
+}
+
+func (*policyStoreStub) CreateLifecyclePolicy(context.Context, string, int) (*core.LifecyclePolicy, error) {
+	panic("unexpected CreateLifecyclePolicy")
+}
+
+func (*policyStoreStub) SetLifecyclePolicyEnabled(context.Context, int64, bool) (*core.LifecyclePolicy, error) {
+	panic("unexpected SetLifecyclePolicyEnabled")
+}
+
+func (*policyStoreStub) DeleteLifecyclePolicy(context.Context, int64) (bool, error) {
+	panic("unexpected DeleteLifecyclePolicy")
+}
+
+func TestConfiguredRulesMergesEnabledDatabasePolicies(t *testing.T) {
+	t.Parallel()
+	m := New(nil, nil, nil)
+	m.SetConfig(&config.LifecycleConfig{Rules: []config.LifecycleRule{
+		{Prefix: "static/", ExpirationDays: 2},
+		{Prefix: "override/", ExpirationDays: 5},
+	}})
+	m.SetPolicyStore(&policyStoreStub{policies: []core.LifecyclePolicy{
+		{Prefix: "dynamic/", ExpirationHours: 6, Enabled: true},
+		{Prefix: "disabled/", ExpirationHours: 1, Enabled: false},
+		{Prefix: "override/", ExpirationHours: 12, Enabled: true},
+	}})
+
+	rules, err := m.ConfiguredRules(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rules) != 3 {
+		t.Fatalf("rules = %+v, want 3 active rules", rules)
+	}
+	got := make(map[string]time.Duration, len(rules))
+	for _, rule := range rules {
+		got[rule.Prefix] = rule.ExpirationDuration()
+	}
+	if got["static/"] != 48*time.Hour || got["dynamic/"] != 6*time.Hour || got["override/"] != 12*time.Hour {
+		t.Fatalf("merged durations = %+v", got)
+	}
+}
+
+func TestProcessConfiguredSurfacesPolicyStoreFailure(t *testing.T) {
+	t.Parallel()
+	m := New(nil, nil, nil)
+	m.SetPolicyStore(&policyStoreStub{err: errors.New("db unavailable")})
+	if _, _, err := m.ProcessConfigured(t.Context()); err == nil {
+		t.Fatal("expected policy-store error")
 	}
 }
 

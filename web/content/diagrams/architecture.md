@@ -269,7 +269,7 @@ High-level architecture of the S3 Orchestrator showing the request path, storage
     LIFE: {
       title: 'Lifecycle Expiration',
       badge: 'background', badgeText: 'background worker',
-      body: '<p>Automatic object expiration with configurable prefix rules. Runs hourly under advisory lock.</p><p>Example: <code>prefix: temp/, days: 30</code> deletes all objects under <code>temp/</code> older than 30 days. Calls ObjectManager.DeleteObject for proper cleanup across all backends.</p><p><a href="../background-services/">Background services coordination diagram &rarr;</a></p>'
+      body: '<p>Automatic object expiration with configurable prefix rules. Scans every 5 minutes under advisory lock.</p><p>Rules can be managed in the admin console with hour precision or declared in YAML with <code>expiration_hours</code>/<code>expiration_days</code>. Calls ObjectManager.DeleteObject for proper cleanup across all backends.</p><p><a href="../background-services/">Background services coordination diagram &rarr;</a></p>'
     },
     MPCLEAN: {
       title: 'Multipart Cleanup',

@@ -113,16 +113,18 @@ Automatically deletes objects whose key matches a prefix and whose age exceeds t
 ```yaml
 lifecycle:
   rules:
-    - prefix: "tmp/"
+    - prefix: "photos/tmp/"
       expiration_days: 7
-    - prefix: "uploads/staging/"
-      expiration_days: 1
+    - prefix: "documents/uploads/staging/"
+      expiration_hours: 6
 ```
 
-- `prefix` — key prefix to match (required, must be non-empty).
-- `expiration_days` — delete objects older than this many days (required, must be > 0).
+- `prefix` — full logical key prefix to match, including the virtual Bucket name (required, must be non-empty).
+- Set exactly one of `expiration_days` or `expiration_hours`; both must be positive integers. `expiration_hours` provides hour-granularity retention while `expiration_days` remains backward compatible.
 - Omit the `lifecycle` section or leave `rules` empty to disable lifecycle entirely.
-- Rules are evaluated every hour by a background worker with an advisory lock.
+- Rules are evaluated every five minutes by a background worker with an advisory lock. Expiration is therefore normally enforced within five minutes after the configured age is reached.
 - Deletions go through the standard `DeleteObject` path — all copies removed, quotas decremented, failed deletes enqueued to the cleanup queue.
 - Hot-reloadable via `SIGHUP`.
+
+The built-in management console can also create database-backed policies without editing YAML. Console policies are scoped to a configured virtual bucket and optional directory, persist across restarts/deployments, and can be paused, resumed, or removed. Enabling or resuming one requires an explicit permanent-deletion acknowledgement. Removing a policy does not delete objects by itself.
 

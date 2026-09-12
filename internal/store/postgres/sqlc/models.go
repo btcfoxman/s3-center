@@ -69,6 +69,15 @@ type CleanupQueue struct {
 	ClaimedBy   *string
 }
 
+type LifecyclePolicy struct {
+	ID              int64
+	Prefix          string
+	ExpirationHours int32
+	Enabled         bool
+	CreatedAt       pgtype.Timestamptz
+	UpdatedAt       pgtype.Timestamptz
+}
+
 type ManagedBackend struct {
 	Name            string
 	EncryptedConfig []byte

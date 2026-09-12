@@ -6,7 +6,8 @@
 // Defines the per-background-service config blocks: RebalanceConfig
 // (enable + threshold + interval), ReplicationConfig (factor and
 // concurrency), CleanupQueueConfig (concurrency), LifecycleRules
-// (prefix + expiration_days array), ReconcileConfig (interval), and
+// (prefix plus an expiration_days or expiration_hours array), ReconcileConfig
+// (interval), and
 // the PendingReaperConfig that controls the PUT-before-COMMIT intent
 // reaper. All blocks are hot-reloadable via SIGHUP; validators ensure
 // every interval is positive and every factor stays within sane
@@ -116,8 +117,9 @@ type ReconcileConfig struct {
 }
 
 // LifecycleConfig holds rules for automatic object expiration. Objects matching
-// a rule's prefix that are older than expiration_days are deleted by a background
-// worker. Empty rules list disables lifecycle processing.
+// a rule's prefix that are older than its configured day- or hour-granularity
+// retention are deleted by a background worker. Empty rules list disables the
+// static rule set; database-backed console policies may still be active.
 type LifecycleConfig struct {
 	Rules     []LifecycleRule `yaml:"rules"`
 	BatchSize int             `yaml:"batch_size"` // objects per DB query (default 100)
@@ -125,8 +127,19 @@ type LifecycleConfig struct {
 
 // LifecycleRule defines a single object expiration rule.
 type LifecycleRule struct {
-	Prefix         string `yaml:"prefix"`
-	ExpirationDays int    `yaml:"expiration_days"`
+	Prefix          string `yaml:"prefix"`
+	ExpirationDays  int    `yaml:"expiration_days,omitempty"`
+	ExpirationHours int    `yaml:"expiration_hours,omitempty"`
+}
+
+// ExpirationDuration returns the rule's retention period. Validation ensures
+// exactly one unit is configured; the fallback keeps directly-constructed test
+// rules deterministic even when they bypass config validation.
+func (r LifecycleRule) ExpirationDuration() time.Duration {
+	if r.ExpirationHours > 0 {
+		return time.Duration(r.ExpirationHours) * time.Hour
+	}
+	return time.Duration(r.ExpirationDays) * 24 * time.Hour
 }
 
 // -------------------------------------------------------------------------
@@ -147,8 +160,8 @@ func (c *LifecycleConfig) setDefaultsAndValidate() []error {
 		if rule.Prefix == "" {
 			errs = append(errs, fmt.Errorf("lifecycle.rules[%d]: %w", i, ErrLifecyclePrefixRequired))
 		}
-		if rule.ExpirationDays <= 0 {
-			errs = append(errs, fmt.Errorf("lifecycle.rules[%d]: %w", i, ErrInvalidExpiration))
+		if err := validateLifecycleExpiration(rule); err != nil {
+			errs = append(errs, fmt.Errorf("lifecycle.rules[%d]: %w", i, err))
 		}
 	}
 	return errs
@@ -232,7 +245,7 @@ func (r *ReplicationConfig) validateReplicationLimits(backendCount int) []error 
 }
 
 // validateLifecycleRules enforces that every configured rule has a
-// non-empty prefix and a positive expiration_days. Returns the set of
+// non-empty prefix and exactly one positive expiration unit. Returns the set of
 // problems so a misconfigured rule cannot silently disable lifecycle
 // expiration.
 func validateLifecycleRules(rules []LifecycleRule) []error {
@@ -246,8 +259,8 @@ func validateLifecycleRules(rules []LifecycleRule) []error {
 		if r.Prefix == "" {
 			errs = append(errs, fmt.Errorf("%s: %w", prefix, ErrLifecyclePrefixRequired))
 		}
-		if r.ExpirationDays <= 0 {
-			errs = append(errs, fmt.Errorf("%s: %w", prefix, ErrInvalidExpiration))
+		if err := validateLifecycleExpiration(*r); err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", prefix, err))
 		}
 		if prefixes[r.Prefix] {
 			errs = append(errs, fmt.Errorf("%s: %w: %q", prefix, ErrDuplicatePrefix, r.Prefix))
@@ -256,4 +269,20 @@ func validateLifecycleRules(rules []LifecycleRule) []error {
 	}
 
 	return errs
+}
+
+// validateLifecycleExpiration requires exactly one explicitly configured,
+// positive unit. Testing non-zero (rather than positive) for ambiguity prevents
+// a negative value in one field from being silently ignored when the other is
+// valid.
+func validateLifecycleExpiration(rule LifecycleRule) error {
+	daysSet := rule.ExpirationDays != 0
+	hoursSet := rule.ExpirationHours != 0
+	if daysSet && hoursSet {
+		return ErrAmbiguousExpiration
+	}
+	if (!daysSet && !hoursSet) || rule.ExpirationDays < 0 || rule.ExpirationHours < 0 {
+		return ErrInvalidExpiration
+	}
+	return nil
 }

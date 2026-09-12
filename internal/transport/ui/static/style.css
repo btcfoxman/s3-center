@@ -455,6 +455,75 @@ td.key { color: var(--mint); font-family: var(--mono); font-size: .72rem; word-b
 
 /* Object browser */
 .objects-section { scroll-margin-top: 7rem; }
+
+/* Retention automation — a compact operations timeline, deliberately distinct
+   from generic dashboard cards so destructive policy state is unmistakable. */
+.retention-section { position: relative; overflow: hidden; scroll-margin-top: 7rem; }
+.retention-section::after { position: absolute; top: -7rem; right: -5rem; width: 22rem; height: 22rem; content: ""; border: 1px solid rgba(246, 200, 108, .08); border-radius: 50%; box-shadow: 0 0 0 3rem rgba(246, 200, 108, .025), 0 0 0 7rem rgba(246, 200, 108, .018); pointer-events: none; }
+.retention-cadence { position: relative; z-index: 1; display: grid; align-items: center; grid-template-columns: auto auto; gap: .05rem .55rem; padding: .65rem .8rem; border: 1px solid rgba(246, 200, 108, .24); border-radius: 11px; background: rgba(54, 41, 16, .3); font-family: var(--mono); }
+.retention-cadence i { width: 7px; height: 7px; grid-row: span 2; border-radius: 50%; background: var(--amber); box-shadow: 0 0 12px rgba(246, 200, 108, .75); animation: breathe 2.2s ease-in-out infinite; }
+.retention-cadence span { color: var(--muted); font-size: .52rem; letter-spacing: .08em; text-transform: uppercase; }
+.retention-cadence b { color: var(--amber); font-size: .68rem; letter-spacing: .1em; }
+.retention-safety-grid { position: relative; z-index: 1; display: grid; grid-template-columns: repeat(3, 1fr); margin-top: 1.1rem; border: 1px solid var(--line); border-radius: 13px; background: rgba(4, 14, 12, .42); }
+.retention-safety-grid div { min-height: 72px; padding: .8rem .9rem; border-right: 1px solid var(--line); }
+.retention-safety-grid div:last-child { border-right: 0; }
+.retention-safety-grid b, .retention-safety-grid span { display: block; }
+.retention-safety-grid b { color: var(--amber); font-family: var(--mono); font-size: .58rem; letter-spacing: .08em; text-transform: uppercase; }
+.retention-safety-grid span { margin-top: .25rem; color: var(--text-soft); font-size: .65rem; line-height: 1.55; }
+.retention-layout { position: relative; z-index: 1; display: grid; align-items: start; grid-template-columns: minmax(0, 1.35fr) minmax(280px, .65fr); gap: 1rem; margin-top: 1rem; }
+.retention-policy-list { display: grid; gap: .65rem; }
+.retention-policy { position: relative; display: grid; overflow: hidden; grid-template-columns: 14px minmax(0, 1fr) auto; gap: .85rem; min-height: 132px; padding: 1rem; border: 1px solid rgba(246, 200, 108, .21); border-radius: 14px; background: linear-gradient(120deg, rgba(52, 40, 17, .28), rgba(9, 20, 17, .72) 52%); transition: border-color .2s ease, transform .2s ease, opacity .2s ease; }
+.retention-policy:hover { border-color: rgba(246, 200, 108, .4); transform: translateY(-1px); }
+.retention-policy-rail { display: flex; align-items: center; flex-direction: column; padding-top: .15rem; }
+.retention-policy-rail i { z-index: 1; width: 9px; height: 9px; flex: 0 0 auto; border: 2px solid #352b16; border-radius: 50%; background: var(--amber); box-shadow: 0 0 0 3px rgba(246, 200, 108, .13), 0 0 15px rgba(246, 200, 108, .38); }
+.retention-policy-rail span { width: 1px; height: 100%; margin-top: .35rem; background: linear-gradient(var(--amber), transparent); opacity: .38; }
+.retention-policy-head { display: flex; align-items: center; gap: .6rem; }
+.retention-state { padding: .2rem .42rem; border: 1px solid rgba(246, 200, 108, .3); border-radius: 999px; color: var(--amber); font-family: var(--mono); font-size: .5rem; font-weight: 800; letter-spacing: .12em; }
+.retention-policy-id { color: #567168; font-family: var(--mono); font-size: .52rem; letter-spacing: .08em; }
+.retention-policy-main code { display: block; margin-top: .55rem; color: var(--text); font-family: var(--mono); font-size: .78rem; overflow-wrap: anywhere; }
+.retention-window { display: flex; align-items: baseline; gap: .42rem; margin-top: .35rem; }
+.retention-window b { color: var(--amber); font-family: var(--mono); font-size: 1.35rem; font-weight: 520; letter-spacing: -.04em; }
+.retention-window span { color: var(--text-soft); font-size: .65rem; }
+.retention-policy-main p { margin-top: .18rem; color: var(--muted); font-size: .61rem; }
+.retention-policy-actions { display: flex; align-items: flex-end; flex-direction: column; justify-content: space-between; gap: .5rem; }
+.retention-policy-actions button { min-height: 34px; padding: 0 .7rem; border-radius: 9px; cursor: pointer; font-family: var(--mono); font-size: .58rem; }
+.lifecycle-remove { border: 0; background: transparent; color: #8c6f6f; }
+.lifecycle-remove:hover { color: var(--danger); }
+.retention-policy.is-disabled { border-color: var(--line); background: rgba(10, 20, 18, .56); opacity: .72; }
+.retention-policy.is-disabled .retention-policy-rail i { background: #658078; box-shadow: none; }
+.retention-policy.is-disabled .retention-policy-rail span { background: linear-gradient(#658078, transparent); }
+.retention-policy.is-disabled .retention-state, .retention-policy.is-disabled .retention-window b { border-color: var(--line-strong); color: var(--muted); }
+.retention-empty { display: flex; min-height: 132px; align-items: center; gap: 1rem; padding: 1.1rem; border: 1px dashed var(--line-strong); border-radius: 14px; background: rgba(5, 14, 12, .3); }
+.retention-empty > span { color: rgba(114, 230, 180, .18); font-family: var(--mono); font-size: 2.6rem; line-height: 1; }
+.retention-empty b { color: var(--text-soft); font-size: .76rem; }
+.retention-empty p { margin-top: .15rem; color: var(--muted); font-size: .65rem; }
+.retention-form { padding: 1rem; border: 1px solid var(--line-strong); border-radius: 14px; background: linear-gradient(150deg, rgba(20, 39, 36, .8), rgba(7, 16, 14, .74)); box-shadow: inset 0 1px rgba(255, 255, 255, .025); }
+.retention-form-heading span { color: var(--mint); font-family: var(--mono); font-size: .52rem; font-weight: 750; letter-spacing: .16em; }
+.retention-form-heading h3 { margin-top: .22rem; font-size: 1.05rem; font-weight: 560; letter-spacing: -.02em; }
+.retention-form-heading p { margin-top: .25rem; color: var(--muted); font-size: .62rem; line-height: 1.55; }
+.retention-form > label:not(.retention-ack) { display: block; margin-top: .75rem; color: var(--text-soft); font-family: var(--mono); font-size: .59rem; font-weight: 650; }
+.retention-form > label > span { float: right; color: var(--muted); font-family: var(--sans); font-size: .56rem; font-weight: 400; }
+.retention-form select, .retention-form input[type="text"], .retention-form input[type="number"] { width: 100%; min-height: 41px; margin-top: .3rem; padding: 0 .7rem; border: 1px solid var(--line-strong); border-radius: 9px; background: rgba(4, 13, 11, .62); color: var(--text); font-family: var(--mono); font-size: .7rem; }
+.retention-form select:focus, .retention-form input:focus { border-color: rgba(246, 200, 108, .58); outline: 0; box-shadow: 0 0 0 4px rgba(246, 200, 108, .06); }
+.retention-hours-input { position: relative; }
+.retention-hours-input input { padding-right: 4.2rem !important; }
+.retention-hours-input span { position: absolute; right: .7rem; bottom: .72rem; color: var(--amber); font-family: var(--mono); font-size: .52rem; letter-spacing: .08em; pointer-events: none; }
+.retention-ack { display: flex; align-items: flex-start; gap: .55rem; margin-top: .8rem; color: var(--text-soft); cursor: pointer; font-size: .61rem; line-height: 1.5; }
+.retention-ack input { width: 14px; height: 14px; flex: 0 0 auto; margin-top: .12rem; accent-color: var(--danger); }
+.retention-form > button { width: 100%; min-height: 40px; margin-top: .85rem; border-radius: 10px; cursor: pointer; font-size: .68rem; font-weight: 750; }
+.retention-form > button:disabled { cursor: not-allowed; opacity: .45; }
+.form-status { min-height: 1.2rem; margin-top: .55rem; color: var(--muted); font-size: .62rem; }
+.form-status.checking { color: var(--amber); }
+.form-status.success { color: var(--mint); }
+.form-status.error, .retention-error { color: var(--danger); }
+.retention-error, .retention-static-note { position: relative; z-index: 1; margin-top: .75rem; padding: .6rem .75rem; border: 1px solid rgba(255, 111, 114, .22); border-radius: 9px; background: rgba(255, 111, 114, .06); font-size: .65rem; }
+.retention-static-note { border-color: rgba(246, 200, 108, .2); background: rgba(246, 200, 108, .05); color: #cdbb8c; }
+.retention-unavailable { color: var(--muted); }
+.retention-unavailable b { color: var(--danger); }
+.retention-unavailable p { margin-top: .3rem; font-size: .65rem; }
+.lifecycle-policy-dialog .account-state-target { margin-top: 1rem; }
+.dialog-ack { padding: .7rem; border: 1px solid rgba(255, 111, 114, .2); border-radius: 9px; background: rgba(255, 111, 114, .06); }
+.dialog-ack[hidden] { display: none; }
 .upload-bar { display: flex; align-items: center; gap: .7rem; }
 .btn-upload { min-height: 39px; border-color: var(--mint); background: var(--mint); color: #07110e; font-weight: 750; }
 .btn-upload:hover { background: var(--mint-bright); box-shadow: 0 10px 26px rgba(114, 230, 180, .14); transform: translateY(-1px); }
@@ -618,6 +687,8 @@ dialog input[type="text"], dialog select { min-height: 43px; padding: 0 .75rem; 
   .section-heading-actions { align-items: flex-start; flex-direction: column; }
   .action-toolbar, .logs-toolbar { justify-content: flex-start; }
   .admin-action-status { text-align: left; }
+  .retention-layout { grid-template-columns: 1fr; }
+  .retention-form { max-width: none; }
 }
 @media (max-width: 800px) {
   .login-wrapper { display: block; }
@@ -639,6 +710,9 @@ dialog input[type="text"], dialog select { min-height: 43px; padding: 0 .75rem; 
   .oauth-identity-band { grid-template-columns: auto 1fr; }
   .connector-download { grid-column: 1 / -1; text-align: center; }
   .oauth-start-grid { grid-template-columns: 1fr; }
+  .retention-safety-grid { grid-template-columns: 1fr; }
+  .retention-safety-grid div { min-height: 0; border-right: 0; border-bottom: 1px solid var(--line); }
+  .retention-safety-grid div:last-child { border-bottom: 0; }
 }
 @media (max-width: 540px) {
   .login-story { min-height: 40vh; }
@@ -665,6 +739,8 @@ dialog input[type="text"], dialog select { min-height: 43px; padding: 0 .75rem; 
   .account-form-grid { grid-template-columns: 1fr; }
   .account-form-grid label.span-2 { grid-column: auto; }
   .account-security-note { grid-template-columns: 1fr; }
+  .retention-policy { grid-template-columns: 10px minmax(0, 1fr); }
+  .retention-policy-actions { grid-column: 2; align-items: center; flex-direction: row; }
   .onboarding-tabs, .oauth-flow-actions, .oauth-ready { align-items: stretch; flex-direction: column; }
   .oauth-session-head { align-items: flex-start; flex-direction: column; }
 }

@@ -60,6 +60,7 @@ var uiAPIRoutes = []uiAPIRoute{
 	{"/api/r2-account-proxy", func(h *Handler) http.HandlerFunc { return h.handleAPIR2AccountProxy }, quotaTrackingTracked,
 		"HeadBucket validates every account bucket through the candidate proxy before the clients are replaced"},
 	{"/api/r2-account-state", func(h *Handler) http.HandlerFunc { return h.handleAPIR2AccountState }, quotaTrackingNone, ""},
+	{"/api/lifecycle-policies", func(h *Handler) http.HandlerFunc { return h.handleAPILifecyclePolicies }, quotaTrackingNone, ""},
 	{"/api/tree", func(h *Handler) http.HandlerFunc { return h.handleTreeAPI }, quotaTrackingNone, ""},
 	{"/api/delete", func(h *Handler) http.HandlerFunc { return h.handleAPIDelete }, quotaTrackingTracked,
 		"objects.DeleteObject -> objects_write.go usage.Record (1 API)"},

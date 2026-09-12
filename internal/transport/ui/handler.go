@@ -96,6 +96,7 @@ type Deps struct {
 	LoginThrottle        *httputil.LoginThrottle
 	BackendManagement    *backendmanage.Manager
 	CloudflareOnboarding *cloudflareonboard.Service
+	LifecyclePolicies    core.LifecyclePolicyStore
 }
 
 // Handler serves the web UI dashboard.
@@ -116,6 +117,7 @@ type Handler struct {
 	loginThrottle        *httputil.LoginThrottle
 	backendManagement    *backendmanage.Manager
 	cloudflareOnboarding *cloudflareonboard.Service
+	lifecyclePolicies    core.LifecyclePolicyStore
 	prefix               string
 	adminKey             string
 	adminSecret          string
@@ -153,6 +155,7 @@ func New(d *Deps) *Handler {
 		loginThrottle:        d.LoginThrottle,
 		backendManagement:    d.BackendManagement,
 		cloudflareOnboarding: d.CloudflareOnboarding,
+		lifecyclePolicies:    d.LifecyclePolicies,
 		adminKey:             d.Cfg.UI.AdminKey,
 		adminSecret:          d.Cfg.UI.AdminSecret,
 		sessionKey:           deriveSessionKey(&d.Cfg.UI),

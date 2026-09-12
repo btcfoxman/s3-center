@@ -550,18 +550,19 @@ Automatically deletes objects whose key matches a prefix and whose age exceeds t
 ```yaml
 lifecycle:
   rules:
-    - prefix: "tmp/"
+    - prefix: "photos/tmp/"
       expiration_days: 7
-    - prefix: "uploads/staging/"
-      expiration_days: 1
+    - prefix: "documents/uploads/staging/"
+      expiration_hours: 6
 ```
 
-- `prefix` — key prefix to match (required, must be non-empty).
-- `expiration_days` — delete objects older than this many days (required, must be > 0).
+- `prefix` — full logical key prefix to match, including the virtual Bucket name (required, must be non-empty).
+- Set exactly one of `expiration_days` or `expiration_hours` to a positive integer. The hour form supports short-lived content; the day form remains compatible with existing configurations.
 - Omit the `lifecycle` section or leave `rules` empty to disable lifecycle entirely.
-- Rules are evaluated every hour by a background worker with an advisory lock.
+- Rules are evaluated every five minutes by a background worker with an advisory lock.
 - Deletions go through the standard `DeleteObject` path — all copies removed, quotas decremented, failed deletes enqueued to the cleanup queue.
 - Hot-reloadable via `SIGHUP`.
+- The web console can create equivalent hour-based policies in the database; those policies survive restarts and deployments without editing this file.
 
 ### encryption
 

@@ -1685,7 +1685,7 @@ func TestLifecycleConfig_ValidRules(t *testing.T) {
 	cfg.Lifecycle = LifecycleConfig{
 		Rules: []LifecycleRule{
 			{Prefix: "tmp/", ExpirationDays: 7},
-			{Prefix: "uploads/staging/", ExpirationDays: 1},
+			{Prefix: "uploads/staging/", ExpirationHours: 6},
 		},
 	}
 
@@ -1729,8 +1729,38 @@ func TestLifecycleConfig_ZeroExpirationDays(t *testing.T) {
 	if err == nil {
 		t.Error("zero expiration_days should fail validation")
 	}
-	if !strings.Contains(err.Error(), "expiration_days must be positive") {
-		t.Errorf("error should mention expiration_days, got: %v", err)
+	if !errors.Is(err, ErrInvalidExpiration) {
+		t.Errorf("error should wrap ErrInvalidExpiration, got: %v", err)
+	}
+}
+
+func TestLifecycleConfig_RejectsBothExpirationUnits(t *testing.T) {
+	t.Parallel()
+	cfg := validBaseConfig()
+	cfg.Lifecycle.Rules = []LifecycleRule{{Prefix: "tmp/", ExpirationDays: 1, ExpirationHours: 2}}
+
+	err := cfg.SetDefaultsAndValidate()
+	if !errors.Is(err, ErrAmbiguousExpiration) {
+		t.Fatalf("error = %v, want ErrAmbiguousExpiration", err)
+	}
+}
+
+func TestLifecycleConfig_RejectsNegativeIgnoredUnit(t *testing.T) {
+	t.Parallel()
+	cfg := validBaseConfig()
+	cfg.Lifecycle.Rules = []LifecycleRule{{Prefix: "tmp/", ExpirationDays: -1, ExpirationHours: 2}}
+
+	err := cfg.SetDefaultsAndValidate()
+	if !errors.Is(err, ErrAmbiguousExpiration) {
+		t.Fatalf("error = %v, want ErrAmbiguousExpiration", err)
+	}
+}
+
+func TestLifecycleRuleExpirationDurationUsesHours(t *testing.T) {
+	t.Parallel()
+	rule := LifecycleRule{Prefix: "tmp/", ExpirationHours: 13}
+	if got := rule.ExpirationDuration(); got != 13*time.Hour {
+		t.Fatalf("ExpirationDuration() = %v, want 13h", got)
 	}
 }
 

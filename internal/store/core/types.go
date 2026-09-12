@@ -21,6 +21,18 @@ type ManagedBackendRecord struct {
 	UpdatedAt       time.Time
 }
 
+// LifecyclePolicy is one database-backed object-retention rule managed by the
+// web console. Prefix always includes the virtual bucket (for example
+// "assets/tmp/") so a policy can never escape the bucket the operator chose.
+type LifecyclePolicy struct {
+	ID              int64     `json:"id"`
+	Prefix          string    `json:"prefix"`
+	ExpirationHours int       `json:"expiration_hours"`
+	Enabled         bool      `json:"enabled"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
+}
+
 // -------------------------------------------------------------------------
 // OBJECT METADATA
 // -------------------------------------------------------------------------

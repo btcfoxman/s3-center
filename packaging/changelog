@@ -41,7 +41,7 @@ s3-orchestrator (0.7.0-1) stable; urgency=low
 s3-orchestrator (0.6.6-1) stable; urgency=low
 
   * Config-driven lifecycle rules for automatic object expiration
-  * Background worker deletes objects matching prefix + expiration_days
+  * Background worker deletes objects matching prefix + expiration hours/days
   * Reuses existing DeleteObject path (quota, cleanup queue, all copies)
   * Hot-reloadable via SIGHUP; no schema migration needed
   * New metrics: lifecycle_deleted_total, lifecycle_failed_total, lifecycle_runs_total

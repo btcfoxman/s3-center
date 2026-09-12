@@ -18,7 +18,9 @@ package expiry
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
+	"slices"
 	"time"
 
 	"github.com/afreidah/s3-orchestrator/internal/config"
@@ -42,10 +44,11 @@ type ObjectDeleter interface {
 // Manager applies lifecycle rules on demand. Safe for concurrent use; the
 // config is swapped atomically by the reload path.
 type Manager struct {
-	store   core.ExpiredObjectsLister
-	objects ObjectDeleter
-	cfg     syncutil.AtomicConfig[config.LifecycleConfig]
-	log     *slog.Logger
+	store       core.ExpiredObjectsLister
+	policyStore core.LifecyclePolicyStore
+	objects     ObjectDeleter
+	cfg         syncutil.AtomicConfig[config.LifecycleConfig]
+	log         *slog.Logger
 }
 
 // New builds a Manager. log may be nil, in which case the default logger is
@@ -54,11 +57,65 @@ func New(store core.ExpiredObjectsLister, objects ObjectDeleter, log *slog.Logge
 	return &Manager{store: store, objects: objects, log: log}
 }
 
+// SetPolicyStore enables database-backed policies managed by the web console.
+// Wiring calls this during startup before workers begin, so no synchronization
+// is needed around the immutable dependency.
+func (m *Manager) SetPolicyStore(store core.LifecyclePolicyStore) { m.policyStore = store }
+
 // SetConfig atomically replaces the lifecycle configuration.
 func (m *Manager) SetConfig(cfg *config.LifecycleConfig) { m.cfg.Store(cfg) }
 
 // Config returns the current lifecycle configuration, or nil when unset.
 func (m *Manager) Config() *config.LifecycleConfig { return m.cfg.Load() }
+
+// HasPolicyStore reports whether console-managed policies are available. The
+// lifecycle ticker uses this to remain active even when YAML has no rules.
+func (m *Manager) HasPolicyStore() bool { return m.policyStore != nil }
+
+// ConfiguredRules merges hot-reloadable YAML rules with enabled database-backed
+// policies. A dynamic rule replaces a static rule with the same prefix; the UI
+// rejects that overlap, but deterministic precedence keeps a race harmless.
+func (m *Manager) ConfiguredRules(ctx context.Context) ([]config.LifecycleRule, error) {
+	var rules []config.LifecycleRule
+	if cfg := m.Config(); cfg != nil {
+		rules = slices.Clone(cfg.Rules)
+	}
+	if m.policyStore == nil {
+		return rules, nil
+	}
+
+	policies, err := m.policyStore.ListLifecyclePolicies(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("load lifecycle policies: %w", err)
+	}
+	byPrefix := make(map[string]int, len(rules))
+	for i := range rules {
+		byPrefix[rules[i].Prefix] = i
+	}
+	for _, policy := range policies {
+		if !policy.Enabled {
+			continue
+		}
+		rule := config.LifecycleRule{Prefix: policy.Prefix, ExpirationHours: policy.ExpirationHours}
+		if i, ok := byPrefix[policy.Prefix]; ok {
+			rules[i] = rule
+			continue
+		}
+		byPrefix[policy.Prefix] = len(rules)
+		rules = append(rules, rule)
+	}
+	return rules, nil
+}
+
+// ProcessConfigured loads the policy snapshot for this tick and applies it.
+func (m *Manager) ProcessConfigured(ctx context.Context) (deleted, failed int, err error) {
+	rules, err := m.ConfiguredRules(ctx)
+	if err != nil {
+		return 0, 0, err
+	}
+	deleted, failed = m.ProcessRules(ctx, rules)
+	return deleted, failed, nil
+}
 
 // logger returns the configured logger, falling back to the default so a
 // Manager built without one in a test still logs through the standard handler.
@@ -101,7 +158,7 @@ func batchSizeFor(cfg *config.LifecycleConfig) int {
 // condition is the infinite-loop guard: without it, a backend outage means
 // every batch fails and the same rows are re-listed forever.
 func (m *Manager) applyRule(ctx context.Context, rule config.LifecycleRule, batchSize int) (deleted, failed int) {
-	cutoff := time.Now().Add(-time.Duration(rule.ExpirationDays) * 24 * time.Hour)
+	cutoff := time.Now().Add(-rule.ExpirationDuration())
 	for {
 		objects, err := m.store.ListExpiredObjects(ctx, rule.Prefix, cutoff, batchSize)
 		if err != nil {
@@ -144,7 +201,7 @@ func (m *Manager) deleteBatch(ctx context.Context, rule config.LifecycleRule, ob
 		audit.Log(ctx, "lifecycle.delete",
 			slog.String("key", key),
 			slog.String("prefix", rule.Prefix),
-			slog.Int("expiration_days", rule.ExpirationDays),
+			slog.Int("retention_hours", int(rule.ExpirationDuration()/time.Hour)),
 		)
 		telemetry.LifecycleDeletedTotal.Inc()
 		deleted++
