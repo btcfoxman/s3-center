@@ -119,7 +119,7 @@ func mustStartMinios(ctx context.Context) []minioInstance {
 	}
 	minios := make([]minioInstance, len(specs))
 	for i, spec := range specs {
-		ctr, err := tcminio.Run(ctx, "minio/minio:latest")
+		ctr, err := tcminio.Run(ctx, "quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z")
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "failed to start %s: %v\n", spec.name, err)
 			os.Exit(1)
