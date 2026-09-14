@@ -130,3 +130,4 @@ func (s *Store) WithAdvisoryLock(ctx context.Context, _ int64, fn func(ctx conte
 // Compile-time check that *Store satisfies the wide metadata-store
 // contract every consumer depends on.
 var _ core.MetadataStore = (*Store)(nil)
+var _ core.RuntimeSettingsStore = (*Store)(nil)

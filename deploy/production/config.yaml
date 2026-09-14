@@ -74,6 +74,7 @@ direct_upload:
   index_only: true
   console_host: s3-center.aiid.qzz.io
   presign_ttl: "3h"
+  access_presign_ttl: "12h"
   session_ttl: "3h"
   reaper_interval: "1m"
   max_object_size: 268435456

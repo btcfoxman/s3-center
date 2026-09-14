@@ -25,6 +25,7 @@ type fakeDirectBackend struct {
 	multipart     map[string]multipartFixture
 	completedSize int64
 	lastPresigned string
+	lastExpiry    time.Duration
 }
 
 type multipartFixture struct {
@@ -44,6 +45,7 @@ func (f *fakeDirectBackend) PresignPutObject(_ context.Context, key, _ string, _
 func (f *fakeDirectBackend) PresignGetObject(_ context.Context, key string, expires time.Duration) (*backend.PresignedRequest, error) {
 	f.mu.Lock()
 	f.lastPresigned = key
+	f.lastExpiry = expires
 	f.mu.Unlock()
 	return &backend.PresignedRequest{Method: http.MethodGet, URL: "https://upstream.invalid/" + key, ExpiresAt: time.Now().Add(expires)}, nil
 }
@@ -109,7 +111,7 @@ func newManagerFixture(t *testing.T) (*Manager, *sqlite.Store, *fakeDirectBacken
 	}
 	fake := newFakeDirectBackend()
 	cfg := config.DirectUploadConfig{
-		Enabled: true, PresignTTL: 10 * time.Minute, SessionTTL: 10 * time.Minute,
+		Enabled: true, PresignTTL: 10 * time.Minute, AccessPresignTTL: 3 * time.Hour, SessionTTL: 10 * time.Minute,
 		MaxObjectSize: 256 << 20, MaxMultipartObjectSize: 5 << 40,
 	}
 	manager, err := NewWithFleet(&cfg, store, staticFleet{
@@ -119,6 +121,75 @@ func newManagerFixture(t *testing.T) (*Manager, *sqlite.Store, *fakeDirectBacken
 		t.Fatalf("create direct manager: %v", err)
 	}
 	return manager, store, fake
+}
+
+func TestAccessPresignTTLCanBeChangedAndPersists(t *testing.T) {
+	t.Parallel()
+	manager, store, fake := newManagerFixture(t)
+	ctx := context.Background()
+
+	ttl, overridden, err := manager.AccessPresignTTL(ctx)
+	if err != nil || overridden || ttl != 3*time.Hour {
+		t.Fatalf("initial TTL = (%v, %v, %v), want (3h, false, nil)", ttl, overridden, err)
+	}
+	if err := manager.SetAccessPresignTTL(ctx, 12*time.Hour); err != nil {
+		t.Fatalf("set access TTL: %v", err)
+	}
+	ttl, overridden, err = manager.AccessPresignTTL(ctx)
+	if err != nil || !overridden || ttl != 12*time.Hour {
+		t.Fatalf("updated TTL = (%v, %v, %v), want (12h, true, nil)", ttl, overridden, err)
+	}
+
+	if _, err := store.ImportObject(ctx, "assets/reports/today.pdf", "r2-one", 12, false, nil); err != nil {
+		t.Fatalf("import object: %v", err)
+	}
+	if _, err := manager.PresignAccess(ctx, &AccessRequest{
+		Bucket: "assets", Key: "reports/today.pdf", Method: http.MethodGet,
+	}); err != nil {
+		t.Fatalf("presign with configured default: %v", err)
+	}
+	fake.mu.Lock()
+	lastExpiry := fake.lastExpiry
+	fake.mu.Unlock()
+	if lastExpiry != 12*time.Hour {
+		t.Fatalf("backend expiry = %v, want 12h", lastExpiry)
+	}
+	if _, err := manager.PresignAccess(ctx, &AccessRequest{
+		Bucket: "assets", Key: "reports/today.pdf", Method: http.MethodGet, Expires: 13 * time.Hour,
+	}); err == nil || !strings.Contains(err.Error(), "configured maximum") {
+		t.Fatalf("13h request error = %v, want configured maximum rejection", err)
+	}
+
+	reloaded, err := NewWithFleet(&config.DirectUploadConfig{AccessPresignTTL: 3 * time.Hour}, store, staticFleet{
+		backends: map[string]backend.ObjectBackend{"r2-one": fake}, order: []string{"r2-one"},
+	}, []config.BucketConfig{{Name: "assets"}})
+	if err != nil {
+		t.Fatalf("reload manager: %v", err)
+	}
+	if ttl, overridden, err = reloaded.AccessPresignTTL(ctx); err != nil || !overridden || ttl != 12*time.Hour {
+		t.Fatalf("persisted TTL = (%v, %v, %v), want (12h, true, nil)", ttl, overridden, err)
+	}
+}
+
+func TestSetAccessPresignTTLValidatesHourRange(t *testing.T) {
+	t.Parallel()
+	manager, _, _ := newManagerFixture(t)
+	for _, ttl := range []time.Duration{0, 30 * time.Minute, 90 * time.Minute, 169 * time.Hour} {
+		if err := manager.SetAccessPresignTTL(t.Context(), ttl); err == nil {
+			t.Errorf("SetAccessPresignTTL(%v) succeeded", ttl)
+		}
+	}
+}
+
+func TestAccessPresignTTLRejectsCorruptStoredValue(t *testing.T) {
+	t.Parallel()
+	manager, store, _ := newManagerFixture(t)
+	if err := store.SetRuntimeSetting(t.Context(), accessPresignTTLSettingKey, "9223372036854775807"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := manager.AccessPresignTTL(t.Context()); !errors.Is(err, ErrAccessSettingsUnavailable) {
+		t.Fatalf("AccessPresignTTL error = %v, want ErrAccessSettingsUnavailable", err)
+	}
 }
 
 func TestPhysicalObjectKeyPreservesOnlySafeExtensions(t *testing.T) {

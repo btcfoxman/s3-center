@@ -30,6 +30,7 @@ type Manager struct {
 	cfg      config.DirectUploadConfig
 	store    core.DirectUploadStore
 	metadata core.MetadataStore
+	settings core.RuntimeSettingsStore
 	fleet    Fleet
 	buckets  map[string]struct{}
 	log      *slog.Logger
@@ -76,7 +77,8 @@ func NewWithFleet(cfg *config.DirectUploadConfig, store core.MetadataStore, flee
 	for _, b := range buckets {
 		allowed[b.Name] = struct{}{}
 	}
-	return &Manager{cfg: *cfg, store: direct, metadata: store, fleet: fleet, buckets: allowed, log: slog.Default().With("component", "direct_upload")}, nil
+	settings, _ := store.(core.RuntimeSettingsStore)
+	return &Manager{cfg: *cfg, store: direct, metadata: store, settings: settings, fleet: fleet, buckets: allowed, log: slog.Default().With("component", "direct_upload")}, nil
 }
 
 func newID() (string, error) {

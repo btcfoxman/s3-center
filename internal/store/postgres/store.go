@@ -152,7 +152,7 @@ func (s *Store) RunMigrations(ctx context.Context) error {
 
 // ExpectedSchemaVersion is the migration version this binary expects.
 // Updated when new migration files are added.
-const ExpectedSchemaVersion = 21
+const ExpectedSchemaVersion = 22
 
 // VerifySchemaVersion checks that the database schema version matches
 // what this binary expects. Returns an error if the schema is older
@@ -220,8 +220,9 @@ func (s *Store) WithTx(ctx context.Context, fn func(ctx context.Context, tx core
 // Compile-time checks that *Store satisfies core.Runner and the wide
 // metadata-store contract every consumer depends on.
 var (
-	_ core.Runner        = (*Store)(nil)
-	_ core.MetadataStore = (*Store)(nil)
+	_ core.Runner               = (*Store)(nil)
+	_ core.MetadataStore        = (*Store)(nil)
+	_ core.RuntimeSettingsStore = (*Store)(nil)
 )
 
 // slimObjectRow is the minimum surface of sqlc rows that project an

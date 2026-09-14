@@ -179,6 +179,14 @@ func ProvideUIHandler(i do.Injector) (*ui.Handler, error) {
 	if r.err != nil {
 		return nil, r.err
 	}
+	var presignSettings ui.PresignSettingsOps
+	if cfg.DirectUpload.Enabled {
+		manager, err := do.Invoke[*directupload.Manager](i)
+		if err != nil {
+			return nil, err
+		}
+		presignSettings = manager
+	}
 
 	var lifecyclePolicies core.LifecyclePolicyStore
 	if store, ok := stores.(core.LifecyclePolicyStore); ok {
@@ -201,6 +209,7 @@ func ProvideUIHandler(i do.Injector) (*ui.Handler, error) {
 		BackendManagement:    backendManagement,
 		CloudflareOnboarding: cloudflareOnboarding,
 		LifecyclePolicies:    lifecyclePolicies,
+		PresignSettings:      presignSettings,
 	}), nil
 }
 

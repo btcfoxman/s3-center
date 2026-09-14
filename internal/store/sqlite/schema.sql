@@ -262,4 +262,11 @@ CREATE TABLE IF NOT EXISTS lifecycle_policies (
 CREATE INDEX IF NOT EXISTS idx_lifecycle_policies_enabled
     ON lifecycle_policies(enabled, prefix);
 
-INSERT INTO schema_version (version) VALUES (11);
+-- Operator-controlled settings that take effect without a config reload.
+CREATE TABLE IF NOT EXISTS runtime_settings (
+    setting_key TEXT PRIMARY KEY CHECK (setting_key <> ''),
+    setting_value TEXT NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+INSERT INTO schema_version (version) VALUES (12);

@@ -29,6 +29,9 @@
         <span class="badge badge-degraded"><i></i> 服务降级</span>
       {{end}}
       <a href="/direct/" class="btn-action direct-link"><span>直传控制台</span><b aria-hidden="true">↗</b></a>
+      {{if .DirectUploadEnabled}}
+      <button class="btn-action presign-settings-trigger" id="presign-settings-btn" type="button" aria-haspopup="dialog" aria-controls="presign-settings-dialog"><span>临时链接</span><b id="presign-settings-chip" aria-label="当前有效期">···</b></button>
+      {{end}}
       <button class="btn-action icon-button" id="refresh-btn"><span>刷新数据</span><b aria-hidden="true">↻</b></button>
       <a href="logout" class="logout-link">退出</a>
     </div>
@@ -583,6 +586,71 @@
   </form>
 </dialog>
 
+{{if .DirectUploadEnabled}}
+<dialog id="presign-settings-dialog" class="presign-settings-dialog">
+  <form id="presign-settings-form" autocomplete="off">
+    <div class="presign-settings-head">
+      <div>
+        <span class="section-index">ACCESS WINDOW / DIRECT UPSTREAM</span>
+        <h2>临时访问链接</h2>
+        <p>控制新签发的上游 R2/S3 GET 与 HEAD 链接时效，保存后立即生效。</p>
+      </div>
+      <div class="presign-current" aria-live="polite">
+        <span>CURRENT</span>
+        <strong id="presign-current-hours">—</strong>
+        <small>HOURS</small>
+      </div>
+    </div>
+
+    <div class="presign-route" aria-label="临时链接的数据路径">
+      <div><span>01</span><b>调用方</b><small>请求签名</small></div>
+      <i aria-hidden="true"></i>
+      <div><span>02</span><b>S3 Center</b><small>授权与选路</small></div>
+      <i aria-hidden="true"></i>
+      <div><span>03</span><b>R2 / S3</b><small>直连传输</small></div>
+    </div>
+
+    <div class="presign-control-grid">
+      <label class="presign-hours-label" for="presign-hours">
+        <span>新链接有效期</span>
+        <div class="presign-hours-input">
+          <input id="presign-hours" name="access_url_expiration_hours" type="number" min="1" max="168" step="1" value="3" required inputmode="numeric">
+          <b>小时</b>
+        </div>
+      </label>
+      <div class="presign-policy-meta">
+        <div><span>产品默认</span><strong id="presign-default-hours">3 小时</strong></div>
+        <div><span>签名上限</span><strong id="presign-maximum-hours">168 小时</strong></div>
+        <div><span>当前来源</span><strong id="presign-source">读取中</strong></div>
+      </div>
+    </div>
+
+    <div class="presign-presets" aria-label="常用有效期">
+      <span>QUICK SET</span>
+      <button type="button" data-hours="1">1H</button>
+      <button type="button" data-hours="3">3H</button>
+      <button type="button" data-hours="6">6H</button>
+      <button type="button" data-hours="12">12H</button>
+      <button type="button" data-hours="24">24H</button>
+      <button type="button" data-hours="72">72H</button>
+      <button type="button" data-hours="168">7D</button>
+    </div>
+
+    <div class="presign-security-note">
+      <b>权限边界</b>
+      <span>链接持有者在过期前可直接访问上游对象，已签发链接不能提前撤销。此设置不会改变上传 PUT 或分片上传会话时效，也不会让文件流量经过 S3 Center。</span>
+    </div>
+    <div id="presign-settings-status" class="form-status presign-settings-status" role="status" aria-live="polite"></div>
+    <div class="dialog-actions presign-settings-actions">
+      <button id="presign-reset" type="button">恢复 3 小时</button>
+      <span></span>
+      <button id="presign-cancel" type="button">取消</button>
+      <button id="presign-save" type="submit" class="btn-primary">保存并立即生效</button>
+    </div>
+  </form>
+</dialog>
+{{end}}
+
 <dialog id="proxy-dialog" class="proxy-dialog">
   <form id="proxy-form" autocomplete="off">
     <div class="dialog-heading">
@@ -758,5 +826,6 @@
 <script src="static/logs.js?v={{.Version}}"></script>
 <script src="static/accounts.js?v={{.Version}}"></script>
 <script src="static/lifecycle.js?v={{.Version}}"></script>
+<script src="static/presign-settings.js?v={{.Version}}"></script>
 </body>
 </html>

@@ -80,6 +80,14 @@ type DashboardOps interface {
 	GetDirectoryChildren(ctx context.Context, prefix, startAfter string, maxKeys int) (*core.DirectoryListResult, error)
 }
 
+// PresignSettingsOps is the live GET/HEAD URL-expiration control exposed by
+// the direct-upload manager. Keeping this narrow lets UI tests use a small
+// in-memory implementation without constructing the storage fleet.
+type PresignSettingsOps interface {
+	AccessPresignTTL(ctx context.Context) (ttl time.Duration, overridden bool, err error)
+	SetAccessPresignTTL(ctx context.Context, ttl time.Duration) error
+}
+
 // Deps holds the dependencies New requires.
 type Deps struct {
 	Dashboard            DashboardOps
@@ -97,6 +105,7 @@ type Deps struct {
 	BackendManagement    *backendmanage.Manager
 	CloudflareOnboarding *cloudflareonboard.Service
 	LifecyclePolicies    core.LifecyclePolicyStore
+	PresignSettings      PresignSettingsOps
 }
 
 // Handler serves the web UI dashboard.
@@ -118,6 +127,7 @@ type Handler struct {
 	backendManagement    *backendmanage.Manager
 	cloudflareOnboarding *cloudflareonboard.Service
 	lifecyclePolicies    core.LifecyclePolicyStore
+	presignSettings      PresignSettingsOps
 	prefix               string
 	adminKey             string
 	adminSecret          string
@@ -156,6 +166,7 @@ func New(d *Deps) *Handler {
 		backendManagement:    d.BackendManagement,
 		cloudflareOnboarding: d.CloudflareOnboarding,
 		lifecyclePolicies:    d.LifecyclePolicies,
+		presignSettings:      d.PresignSettings,
 		adminKey:             d.Cfg.UI.AdminKey,
 		adminSecret:          d.Cfg.UI.AdminSecret,
 		sessionKey:           deriveSessionKey(&d.Cfg.UI),

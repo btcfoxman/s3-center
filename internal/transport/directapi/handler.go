@@ -35,7 +35,6 @@ type Handler struct {
 	deleter     ObjectDeleter
 	tokens      []token
 	consoleHost string
-	presignTTL  time.Duration
 }
 
 // ObjectDeleter performs a metadata-coordinated upstream delete. DELETE has no
@@ -47,7 +46,7 @@ type ObjectDeleter interface {
 
 //nolint:gocritic // The handler owns an immutable configuration snapshot.
 func New(manager *directupload.Manager, cfg config.DirectUploadConfig, deleters ...ObjectDeleter) *Handler {
-	h := &Handler{manager: manager, consoleHost: cfg.ConsoleHost, presignTTL: cfg.PresignTTL}
+	h := &Handler{manager: manager, consoleHost: cfg.ConsoleHost}
 	if len(deleters) > 0 {
 		h.deleter = deleters[0]
 	}
@@ -305,8 +304,8 @@ func (h *Handler) presignObject(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_request", "expires_seconds must not be negative")
 		return
 	}
-	if h.presignTTL > 0 && in.ExpiresSeconds > int64(h.presignTTL/time.Second) {
-		writeError(w, http.StatusBadRequest, "invalid_request", fmt.Sprintf("expires_seconds exceeds maximum of %.0f", h.presignTTL.Seconds()))
+	if in.ExpiresSeconds > int64(config.MaxAccessPresignTTL/time.Second) {
+		writeError(w, http.StatusBadRequest, "invalid_request", "expires_seconds must not exceed 604800")
 		return
 	}
 	result, err := h.manager.PresignAccess(r.Context(), &directupload.AccessRequest{
@@ -484,6 +483,8 @@ func writeManagerError(w http.ResponseWriter, err error) {
 		status, code = http.StatusNotFound, "object_not_found"
 	case errors.Is(err, directupload.ErrDirectAccessUnsupported):
 		status, code = http.StatusConflict, "direct_access_unsupported"
+	case errors.Is(err, directupload.ErrAccessSettingsUnavailable):
+		status, code = http.StatusServiceUnavailable, "access_settings_unavailable"
 	}
 	writeError(w, status, code, err.Error())
 }

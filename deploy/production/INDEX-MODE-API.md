@@ -246,12 +246,13 @@ Content-Type: application/json
 {
   "bucket": "assets",
   "key": "partners/acme/2026/report.pdf",
-  "method": "GET",
-  "expires_seconds": 10800
+  "method": "GET"
 }
 ```
 
-`method` 只能是 `GET` 或 `HEAD`。生产环境默认与上限均为 **3 小时（10,800 秒）**：`expires_seconds` 省略、为 `0` 或填写 `10800` 都会得到 3 小时授权；调用方也可以填写更小的正整数主动缩短有效期。
+`method` 只能是 `GET` 或 `HEAD`。`expires_seconds` 省略或为 `0` 时使用管理员当前设置；本生产环境当前设置为 **12 小时（43,200 秒）**。产品在未配置时的默认值是 **3 小时**，管理员可在管理端的“临时链接”弹窗中设置 1–168 个整小时，保存后立即影响新签发链接且重启后保留。
+
+调用方可填写更小的正整数主动缩短单次授权，例如 `expires_seconds: 1800` 表示 30 分钟。显式值不能超过管理员当前设置，即使 OpenAPI 允许的协议绝对上限为 604,800 秒（7 天）；超过时返回 `400`。已经签发的 URL 不会因管理员修改设置而改变或提前失效，准确截止时间始终以响应中的 `request.expires_at` 为准。
 
 返回 `200`：
 
@@ -315,7 +316,7 @@ async function download(bucket, key) {
   const grant = await fetch(`${control}/v1/objects/presign`, {
     method: "POST",
     headers: {...auth, "Content-Type": "application/json"},
-    body: JSON.stringify({bucket, key, method: "GET", expires_seconds: 10800}),
+    body: JSON.stringify({bucket, key, method: "GET"}),
   });
   if (!grant.ok) throw new Error(await grant.text());
   const {request} = await grant.json();
@@ -341,7 +342,7 @@ grant = requests.post(
     f"{CONTROL}/v1/objects/presign",
     headers=AUTH,
     json={"bucket": "assets", "key": "partners/acme/2026/report.pdf",
-          "method": "GET", "expires_seconds": 10800},
+          "method": "GET"},
 )
 grant.raise_for_status()
 request = grant.json()["request"]

@@ -311,6 +311,8 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .btn-action:disabled { cursor: wait; opacity: .55; transform: none; }
 .direct-link { border-color: rgba(114, 230, 180, .36); background: rgba(114, 230, 180, .12); color: var(--mint-bright); }
 .icon-button b, .direct-link b { color: var(--mint); font-size: .95rem; }
+.presign-settings-trigger { border-color: rgba(246, 200, 108, .28); background: rgba(246, 200, 108, .07); }
+.presign-settings-trigger b { min-width: 2.15rem; padding: .18rem .4rem; border: 1px solid rgba(246, 200, 108, .24); border-radius: 6px; background: rgba(246, 200, 108, .09); color: var(--amber); font-family: var(--mono); font-size: .58rem; letter-spacing: .07em; text-align: center; }
 .logout-link { padding: 0 .45rem; color: var(--muted); font-size: .75rem; text-decoration: none; transition: color .18s; }
 .logout-link:hover { color: var(--coral); }
 
@@ -587,6 +589,44 @@ dialog#sync-dialog { max-width: 400px; }
 .account-dialog { width: min(calc(100% - 2rem), 860px); max-height: min(90vh, 900px); overflow-y: auto; padding: 0; }
 .account-onboarding-shell { padding: clamp(1.15rem, 3vw, 1.75rem); }
 .proxy-dialog { width: min(calc(100% - 2rem), 620px); }
+.presign-settings-dialog { width: min(calc(100% - 2rem), 720px); max-height: min(92vh, 880px); overflow-y: auto; padding: 0; background: radial-gradient(circle at 85% 0, rgba(246, 200, 108, .09), transparent 18rem), var(--panel-solid); }
+.presign-settings-dialog form { padding: clamp(1.2rem, 3vw, 1.75rem); }
+.presign-settings-head { display: grid; align-items: start; grid-template-columns: minmax(0, 1fr) auto; gap: 1.2rem; }
+.presign-settings-head h2 { margin-top: .28rem; font-size: clamp(1.55rem, 4vw, 2rem); font-weight: 560; letter-spacing: -.045em; }
+.presign-settings-head p { max-width: 31rem; margin-top: .35rem; color: var(--muted); font-size: .75rem; line-height: 1.6; }
+.presign-current { display: grid; min-width: 112px; padding: .75rem .9rem; border: 1px solid rgba(246, 200, 108, .25); border-radius: 14px; background: linear-gradient(145deg, rgba(246, 200, 108, .11), rgba(20, 36, 32, .48)); text-align: right; }
+.presign-current span, .presign-current small { color: var(--amber); font-family: var(--mono); font-size: .51rem; font-weight: 750; letter-spacing: .16em; }
+.presign-current strong { margin: .1rem 0 -.08rem; color: #ffe3a8; font-family: var(--mono); font-size: 2.1rem; font-weight: 500; line-height: 1; }
+.presign-route { display: grid; align-items: center; grid-template-columns: 1fr minmax(24px, .45fr) 1fr minmax(24px, .45fr) 1fr; gap: .45rem; margin-top: 1.25rem; padding: .85rem; border: 1px solid var(--line); border-radius: 14px; background: rgba(2, 12, 10, .45); }
+.presign-route div { display: grid; grid-template-columns: auto 1fr; gap: .08rem .48rem; }
+.presign-route div span { grid-row: span 2; color: rgba(114, 230, 180, .55); font-family: var(--mono); font-size: .55rem; }
+.presign-route div b { color: var(--text-soft); font-size: .67rem; font-weight: 650; }
+.presign-route div small { color: var(--muted); font-size: .57rem; }
+.presign-route > i { height: 1px; background: linear-gradient(90deg, rgba(114, 230, 180, .12), rgba(114, 230, 180, .62), rgba(114, 230, 180, .12)); }
+.presign-control-grid { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(230px, .9fr); gap: .8rem; margin-top: .8rem; }
+.presign-hours-label { display: block; padding: .9rem; border: 1px solid var(--line-strong); border-radius: 14px; background: rgba(20, 39, 36, .52); color: var(--text-soft); font-family: var(--mono); font-size: .61rem; font-weight: 700; letter-spacing: .07em; }
+.presign-hours-input { display: grid; align-items: end; grid-template-columns: minmax(0, 1fr) auto; gap: .65rem; margin-top: .55rem; }
+.presign-hours-input input { width: 100%; min-width: 0; padding: 0; border: 0; border-bottom: 1px solid rgba(114, 230, 180, .38); outline: 0; background: transparent; color: var(--mint-bright); font-family: var(--mono); font-size: 2.45rem; font-weight: 450; line-height: 1.15; }
+.presign-hours-input input:focus { border-color: var(--mint); box-shadow: 0 4px 0 rgba(114, 230, 180, .06); }
+.presign-hours-input input:disabled { opacity: .55; }
+.presign-hours-input b { padding-bottom: .35rem; color: var(--muted); font-family: var(--sans); font-size: .68rem; font-weight: 500; letter-spacing: 0; }
+.presign-policy-meta { display: grid; overflow: hidden; border: 1px solid var(--line); border-radius: 14px; background: rgba(4, 14, 12, .38); }
+.presign-policy-meta div { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: .55rem .75rem; border-bottom: 1px solid var(--line); }
+.presign-policy-meta div:last-child { border-bottom: 0; }
+.presign-policy-meta span { color: var(--muted); font-size: .6rem; }
+.presign-policy-meta strong { color: var(--text-soft); font-family: var(--mono); font-size: .61rem; font-weight: 650; text-align: right; }
+.presign-presets { display: flex; align-items: center; gap: .38rem; margin-top: .8rem; overflow-x: auto; padding-bottom: .1rem; }
+.presign-presets > span { margin-right: .25rem; color: var(--muted); font-family: var(--mono); font-size: .53rem; font-weight: 700; letter-spacing: .12em; white-space: nowrap; }
+.presign-presets button { min-width: 42px; min-height: 32px; padding: 0 .55rem; border: 1px solid var(--line); border-radius: 8px; background: rgba(20, 39, 36, .55); color: var(--muted); cursor: pointer; font-family: var(--mono); font-size: .58rem; font-weight: 700; }
+.presign-presets button:hover, .presign-presets button.active { border-color: rgba(246, 200, 108, .42); background: rgba(246, 200, 108, .1); color: var(--amber); }
+.presign-presets button:disabled { cursor: wait; opacity: .45; }
+.presign-security-note { display: grid; grid-template-columns: auto 1fr; gap: .7rem; margin-top: 1rem; padding: .75rem .85rem; border-left: 2px solid var(--amber); border-radius: 0 10px 10px 0; background: rgba(246, 200, 108, .055); }
+.presign-security-note b { color: var(--amber); font-family: var(--mono); font-size: .61rem; white-space: nowrap; }
+.presign-security-note span { color: var(--muted); font-size: .64rem; line-height: 1.55; }
+.presign-settings-status { min-height: 1rem; margin-top: .75rem; }
+.presign-settings-actions { align-items: center; margin-top: .5rem; }
+.presign-settings-actions > span { flex: 1; }
+#presign-reset { border-color: rgba(246, 200, 108, .2); color: var(--amber); }
 .dialog-heading h2 { margin-top: .25rem; font-size: 1.45rem; font-weight: 560; letter-spacing: -.035em; }
 .dialog-heading p { margin-top: .35rem; color: var(--muted); font-size: .75rem; }
 .account-form-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: .75rem; margin-top: 1.15rem; }
@@ -713,6 +753,7 @@ dialog input[type="text"], dialog select { min-height: 43px; padding: 0 .75rem; 
   .retention-safety-grid { grid-template-columns: 1fr; }
   .retention-safety-grid div { min-height: 0; border-right: 0; border-bottom: 1px solid var(--line); }
   .retention-safety-grid div:last-child { border-bottom: 0; }
+  .presign-route { grid-template-columns: 1fr 20px 1fr 20px 1fr; }
 }
 @media (max-width: 540px) {
   .login-story { min-height: 40vh; }
@@ -723,8 +764,9 @@ dialog input[type="text"], dialog select { min-height: 43px; padding: 0 .75rem; 
   .brand-mark { width: 38px; height: 38px; flex-basis: 38px; }
   .topbar { position: relative; top: 0; }
   .header-right .badge { order: -1; }
-  .header-right .direct-link span, .header-right .icon-button span { display: none; }
+  .header-right .direct-link span, .header-right .icon-button span, .header-right .presign-settings-trigger span { display: none; }
   .header-right .btn-action { width: 38px; padding: 0; }
+  .header-right .presign-settings-trigger { width: auto; min-width: 48px; padding: 0 .35rem; }
   .overview-grid, .configuration-section .config-grid { grid-template-columns: 1fr; }
   .overview-grid .config-card { min-height: 96px; }
   .section-heading { flex-direction: column; }
@@ -743,6 +785,17 @@ dialog input[type="text"], dialog select { min-height: 43px; padding: 0 .75rem; 
   .retention-policy-actions { grid-column: 2; align-items: center; flex-direction: row; }
   .onboarding-tabs, .oauth-flow-actions, .oauth-ready { align-items: stretch; flex-direction: column; }
   .oauth-session-head { align-items: flex-start; flex-direction: column; }
+  .presign-settings-head { grid-template-columns: 1fr; }
+  .presign-current { width: 100%; grid-template-columns: 1fr auto auto; align-items: end; gap: .45rem; text-align: left; }
+  .presign-current strong { margin-left: auto; font-size: 1.7rem; }
+  .presign-current small { padding-bottom: .12rem; }
+  .presign-route { grid-template-columns: 1fr; }
+  .presign-route > i { width: 1px; height: 16px; margin-left: 9px; background: linear-gradient(rgba(114, 230, 180, .12), rgba(114, 230, 180, .62), rgba(114, 230, 180, .12)); }
+  .presign-control-grid { grid-template-columns: 1fr; }
+  .presign-security-note { grid-template-columns: 1fr; }
+  .presign-settings-actions { flex-wrap: wrap; }
+  .presign-settings-actions > span { display: none; }
+  .presign-settings-actions button { flex: 1 1 42%; }
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }

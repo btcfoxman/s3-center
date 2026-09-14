@@ -242,8 +242,8 @@ components:
         expires_seconds:
           type: integer
           minimum: 0
-          maximum: 10800
-          description: Omit or set to 0 for the production default of 3 hours; smaller positive values shorten the grant.
+          maximum: 604800
+          description: Omit or set to 0 to use the operator-configured access window (currently 12 hours in production; product default 3 hours). Positive values may shorten it but cannot exceed the current operator setting or the 7-day SigV4 limit.
     ObjectGrant:
       type: object
       required: [bucket, key, size_bytes, request]

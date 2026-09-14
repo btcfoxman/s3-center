@@ -749,6 +749,28 @@ func TestStoreInt_LifecyclePolicies(t *testing.T) {
 	}
 }
 
+// TestStoreInt_RuntimeSettings verifies operator settings are persisted with
+// upsert semantics and missing keys remain distinguishable from empty values.
+func TestStoreInt_RuntimeSettings(t *testing.T) {
+	store := adapterPgStore(t)
+	ctx := context.Background()
+	key := uniqueKey(t, "runtime-setting")
+
+	if value, found, err := store.GetRuntimeSetting(ctx, key); err != nil || found || value != "" {
+		t.Fatalf("missing setting = (%q, %v, %v)", value, found, err)
+	}
+	if err := store.SetRuntimeSetting(ctx, key, "10800"); err != nil {
+		t.Fatalf("set runtime setting: %v", err)
+	}
+	if err := store.SetRuntimeSetting(ctx, key, "43200"); err != nil {
+		t.Fatalf("update runtime setting: %v", err)
+	}
+	value, found, err := store.GetRuntimeSetting(ctx, key)
+	if err != nil || !found || value != "43200" {
+		t.Fatalf("stored setting = (%q, %v, %v), want (43200, true, nil)", value, found, err)
+	}
+}
+
 // -------------------------------------------------------------------------
 // OBJECT LIST QUERIES
 // -------------------------------------------------------------------------

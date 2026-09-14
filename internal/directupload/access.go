@@ -65,12 +65,16 @@ func (m *Manager) PresignAccess(ctx context.Context, r *AccessRequest) (*AccessR
 	if method != http.MethodGet && method != http.MethodHead {
 		return nil, fmt.Errorf("method must be GET or HEAD")
 	}
+	maximum, _, err := m.AccessPresignTTL(ctx)
+	if err != nil {
+		return nil, err
+	}
 	expires := r.Expires
 	if expires <= 0 {
-		expires = m.cfg.PresignTTL
+		expires = maximum
 	}
-	if expires > m.cfg.PresignTTL {
-		return nil, fmt.Errorf("expiry exceeds configured maximum of %s", m.cfg.PresignTTL)
+	if expires > maximum {
+		return nil, fmt.Errorf("expiry exceeds configured maximum of %s", maximum)
 	}
 
 	locations, err := m.metadata.GetAllObjectLocations(ctx, logical)

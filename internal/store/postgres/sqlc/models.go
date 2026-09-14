@@ -167,6 +167,12 @@ type QuotaGroup struct {
 	UpdatedAt          pgtype.Timestamptz
 }
 
+type RuntimeSetting struct {
+	SettingKey   string
+	SettingValue string
+	UpdatedAt    pgtype.Timestamptz
+}
+
 type UploadSession struct {
 	ID               string
 	IdempotencyKey   string

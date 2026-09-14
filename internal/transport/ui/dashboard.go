@@ -46,6 +46,7 @@ type dashboardPage struct {
 	CloudflareAccounts     []cloudflareAccountUsage
 	ManagedBackendsEnabled bool
 	CloudflareOAuthEnabled bool
+	DirectUploadEnabled    bool
 	IndexOnly              bool
 	LifecyclePolicies      []core.LifecyclePolicy
 	LifecyclePolicyEnabled bool
@@ -284,6 +285,7 @@ func (h *Handler) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		TotalOrphanBytes:       totalOrphan,
 		ManagedBackendsEnabled: h.backendManagement != nil && h.backendManagement.Enabled(),
 		CloudflareOAuthEnabled: h.cloudflareOnboarding != nil && h.cloudflareOnboarding.Enabled(),
+		DirectUploadEnabled:    cfg.DirectUpload.Enabled,
 		IndexOnly:              cfg.DirectUpload.IndexOnly,
 		LifecyclePolicies:      lifecyclePolicies,
 		LifecyclePolicyEnabled: lifecyclePolicyEnabled,

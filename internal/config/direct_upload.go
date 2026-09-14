@@ -12,6 +12,7 @@ type DirectUploadConfig struct {
 	Enabled                bool                `yaml:"enabled"`
 	IndexOnly              bool                `yaml:"index_only"`
 	PresignTTL             time.Duration       `yaml:"presign_ttl"`
+	AccessPresignTTL       time.Duration       `yaml:"access_presign_ttl"`
 	SessionTTL             time.Duration       `yaml:"session_ttl"`
 	ReaperInterval         time.Duration       `yaml:"reaper_interval"`
 	MaxObjectSize          int64               `yaml:"max_object_size"`
@@ -19,6 +20,14 @@ type DirectUploadConfig struct {
 	ConsoleHost            string              `yaml:"console_host"`
 	Tokens                 []DirectUploadToken `yaml:"tokens"`
 }
+
+const (
+	// DefaultAccessPresignTTL is the product default for direct GET/HEAD grants.
+	// Upload and multipart signatures continue to use PresignTTL independently.
+	DefaultAccessPresignTTL = 3 * time.Hour
+	// MaxAccessPresignTTL follows the SigV4/R2 maximum for presigned URLs.
+	MaxAccessPresignTTL = 7 * 24 * time.Hour
+)
 
 type DirectUploadToken struct {
 	Name     string   `yaml:"name"`
@@ -36,6 +45,9 @@ func (c *DirectUploadConfig) setDefaultsAndValidate() []error {
 	if c.PresignTTL <= 0 {
 		c.PresignTTL = 10 * time.Minute
 	}
+	if c.AccessPresignTTL == 0 {
+		c.AccessPresignTTL = DefaultAccessPresignTTL
+	}
 	if c.SessionTTL <= 0 {
 		c.SessionTTL = 10 * time.Minute
 	}
@@ -51,6 +63,9 @@ func (c *DirectUploadConfig) setDefaultsAndValidate() []error {
 	var errs []error
 	if c.PresignTTL > c.SessionTTL {
 		errs = append(errs, fmt.Errorf("direct_upload.presign_ttl must not exceed session_ttl"))
+	}
+	if c.AccessPresignTTL < time.Hour || c.AccessPresignTTL > MaxAccessPresignTTL || c.AccessPresignTTL%time.Hour != 0 {
+		errs = append(errs, fmt.Errorf("direct_upload.access_presign_ttl must be a whole number of hours between 1h and 168h"))
 	}
 	if len(c.Tokens) == 0 {
 		errs = append(errs, fmt.Errorf("direct_upload.tokens requires at least one token"))

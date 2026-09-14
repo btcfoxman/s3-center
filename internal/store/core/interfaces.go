@@ -240,6 +240,14 @@ type LifecyclePolicyStore interface {
 	DeleteLifecyclePolicy(ctx context.Context, id int64) (bool, error)
 }
 
+// RuntimeSettingsStore persists small operator-controlled values that must
+// take effect without rewriting config.yaml or restarting the process. Values
+// stay opaque at this layer; each owning service validates its own format.
+type RuntimeSettingsStore interface {
+	GetRuntimeSetting(ctx context.Context, key string) (value string, found bool, err error)
+	SetRuntimeSetting(ctx context.Context, key, value string) error
+}
+
 // AdvisoryLocker defines the leader-election helper used by background
 // services. SQLite implementations no-op since the engine serializes
 // writers; on Postgres this is pg_try_advisory_lock with the supplied
