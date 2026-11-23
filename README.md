@@ -4,9 +4,7 @@
 
 # s3-orchestrator
 
-[![CI](https://github.com/afreidah/s3-orchestrator/actions/workflows/ci.yml/badge.svg)](https://github.com/afreidah/s3-orchestrator/actions/workflows/ci.yml)
-[![Coverage](https://sonarcloud.io/api/project_badges/measure?project=afreidah_s3-orchestrator&metric=coverage)](https://sonarcloud.io/summary/new_code?id=afreidah_s3-orchestrator)
-[![Quality Gate](https://sonarcloud.io/api/project_badges/measure?project=afreidah_s3-orchestrator&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=afreidah_s3-orchestrator)
+[![Production Docker](https://github.com/btcfoxman/s3-center/actions/workflows/production-docker.yml/badge.svg)](https://github.com/btcfoxman/s3-center/actions/workflows/production-docker.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 <p align="center">
@@ -143,7 +141,6 @@ Deeper details: [docs/architecture.md](docs/architecture.md).
 | Performance tuning | [docs/performance-tuning.md](docs/performance-tuning.md) |
 | Disaster recovery | [docs/disaster-recovery.md](docs/disaster-recovery.md) |
 | Version migration | [docs/version-migration.md](docs/version-migration.md) |
-| Benchmark trends | [Live charts](https://afreidah.github.io/s3-orchestrator/dev/bench/) · [scheduled runs](https://github.com/afreidah/s3-orchestrator/actions/workflows/benchmarks.yml) |
 | Coding conventions | [docs/style-guide.md](docs/style-guide.md) |
 | Build / test / contribute | [CONTRIBUTING.md](CONTRIBUTING.md) |
 

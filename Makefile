@@ -111,7 +111,7 @@ check: ## Run fast local checks for contributor iteration
 	$(MAKE) vet
 	$(MAKE) doc-stub-check
 
-# Keep in sync with the version pinned in .github/workflows/ci.yml.
+# Pin the local lint version independently of the production deployment workflow.
 GOLANGCI_VERSION ?= v2.13.0
 GOLANGCI := go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_VERSION)
 
@@ -163,14 +163,13 @@ govulncheck: ## Scan Go dependencies for known vulnerabilities
 # COVERAGE (used by SonarCloud and local sonar-scan target)
 # -------------------------------------------------------------------------
 
-# Flags mirror .github/workflows/ci.yml so the local profile matches what
-# the CI sonarqube job consumes. -coverpkg=./... measures cross-package
-# coverage; -covermode=atomic is required for race-enabled runs.
+# -coverpkg=./... measures cross-package coverage; -covermode=atomic is
+# required for race-enabled runs.
 COVER_FLAGS := -race -coverprofile=coverage.out -covermode=atomic -coverpkg=./...
 INTEGRATION_COVER_FLAGS := -race -v -tags integration -count=1 \
 	-coverprofile=integration-coverage.out -covermode=atomic -coverpkg=./...
 
-coverage: ## Generate coverage.out from unit tests (mirrors CI test job)
+coverage: ## Generate coverage.out from unit tests
 	go test $(COVER_FLAGS) ./...
 
 integration-coverage: ## Generate integration-coverage.out (requires Docker for testcontainers)
